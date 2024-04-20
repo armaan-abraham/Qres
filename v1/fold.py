@@ -1,31 +1,42 @@
-from transformers import AutoTokenizer, EsmForProteinFolding
 import torch
+import time
+import matplotlib.pyplot as plt
+import seaborn as sns
+from transformers import AutoTokenizer, EsmForProteinFolding
 from transformers.models.esm.openfold_utils.protein import to_pdb, Protein as OFProtein
 from transformers.models.esm.openfold_utils.feats import atom14_to_atom37
 
-# check if gpu available
+AMINO_ACIDS = 'ACDEFGHIKLMNPQRSTVWY'
 
+if not torch.cuda.is_available():
+    print("WARNING: GPU not found")
 
 torch.backends.cuda.matmul.allow_tf32 = True
 
 tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
-model = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1", low_cpu_mem_usage=True)
+model = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1")
 
 if torch.cuda.is_available():
     model = model.cuda()
 
-# Uncomment to switch the stem to float16
-# model.esm = model.esm.half()
+model.esm = model.esm.half()
+# model.trunk.set_chunk_size(64)
 
-test_protein = "MGAGASAEEKHSRELEKKLKEDAEKDARTVKLLLLGAGESGKSTIVKQMKIIHQDGYSLEECLEFIAIIYGNTLQSILAIVRAMTTLNIQYGDSARQDDARKLMHMADTIEEGTMPKEMSDIIQRLWKDSGIQACFERASEYQLNDSAGYYLSDLERLVTPGYVPTEQDVLRSRVKTTGIIETQFSFKDLNFRMFDVGGQRSERKKWIHCFEGVTCIIFIAALSAYDMVLVEDDEVNRMHESLHLFNSICNHRYFATTSIVLFLNKKDVFFEKIKKAHLSICFPDYDGPNTYEDAGNYIKVQFLELNMRRDVKEIYSHMTCATDTQNVKFVFDAVTDIIIKENLKDCGLF"
+def infer_structure(sequence):
+    with torch.no_grad():
+        output = model.infer_pdb(sequence)
+    return output
 
-tokenized_input = tokenizer([test_protein], return_tensors="pt", add_special_tokens=False)['input_ids']
-
-if torch.cuda.is_available():
-    tokenized_input = tokenized_input.cuda()
-
-with torch.no_grad():
-    output = model(tokenized_input)
+def infer_structure_batch(sequences):
+    tokenized_input = tokenizer(sequences, return_tensors="pt", add_special_tokens=False).to(model.device)["input_ids"]
+    if torch.cuda.is_available():
+        tokenized_input = tokenized_input.cuda()
+    with torch.no_grad():
+        outputs = model(tokenized_input)
+    start = time.time()
+    outputs = convert_outputs_to_pdb(outputs)
+    print("convert outputs to pdb", time.time() - start)
+    return outputs
 
 def convert_outputs_to_pdb(outputs):
     final_atom_positions = atom14_to_atom37(outputs["positions"][-1], outputs)
@@ -49,6 +60,37 @@ def convert_outputs_to_pdb(outputs):
         pdbs.append(to_pdb(pred))
     return pdbs
 
-pdb = convert_outputs_to_pdb(output)
+if __name__ == "__main__":
+    test_protein = "MGAGASAEEKHSRELEKKLKEDAEKDARTVKLLLLGAGESGKSTIVKQMKIIHQDGYSLEECLEFIAIIYGNTLQSILAIVRAMTTLNIQYGDSARQDDARKLMHMADTIEEGTMPKEMSDIIQRLWKDSGIQACFERASEYQLNDSAGYYLSDLERLVTPGYVPTEQDVLRSRVKTTGIIETQFSFKDLNFRMFDVGGQRSERKKWIHCFEGVTCIIFIAALSAYDMVLVEDDEVNRMHESLHLFNSICNHRYFATTSIVLFLNKKDVFFEKIKKAHLSICFPDYDGPNTYEDAGNYIKVQFLELNMRRDVKEIYSHMTCATDTQNVKFVFDAVTDIIIKENLKDCGLF"
+    tpp = []
+    for i in range(15):
+        test_proteins = [test_protein[:50] for j in range(i+1)]
+        start = time.time()
+        infer_structure_batch(test_proteins)
+        tpp.append((time.time() - start) / (i+1))
+    print(tpp)
+    ax = sns.lineplot(x=range(len(tpp)), y=tpp)
+    # print to svg
+    plt.savefig("test.svg")
 
-print(pdb)
+    # test_proteins = [test_protein, test_protein, test_protein[:10], test_protein[:20], test_protein[:30], test_protein[:50], test_protein[:100], test_protein[:200]]
+    # test_proteins = [test_protein]
+    # for i in range(50):
+    #     test_proteins = [test_protein[:100] for j in range(i+1)]
+    #     start = time.time()
+    #     infer_structure_batch(test_proteins)
+    #     print(len(test_proteins), time.time() - start)
+
+
+    # start = time.time()
+    # infer_structure_batch(test_proteins)
+    # print(time.time() - start)
+
+
+
+
+    # for p in test_proteins:
+    #     start = time.time()
+    #     infer_structure(p)
+    #     print(len(p), time.time() - start)
+
