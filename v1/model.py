@@ -4,8 +4,6 @@ import torch.nn as nn
 
 from protein import AMINO_ACIDS
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 
 def sequence_onehot_length(sequence_length):
     return sequence_length * len(AMINO_ACIDS)

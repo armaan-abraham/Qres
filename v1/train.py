@@ -5,6 +5,7 @@ import typing
 import yaml
 from itertools import count
 from pathlib import Path
+from collections import deque
 
 
 import uuid
@@ -41,6 +42,13 @@ LOSS_TOL = 5e-2
 REWARD_SUM_TOL = 1e-2
 CHECKPOINT_INTERVAL = 1
 
+if torch.cuda.is_available():
+    print("GPU available")
+    device = torch.device("cuda")
+else:
+    print("No GPU available")
+    device = torch.device("cpu")
+
 Objective = namedtuple("Objective", ("idx1", "idx2", "distance"))
 
 Transition = namedtuple(
@@ -48,7 +56,6 @@ Transition = namedtuple(
     "Transition",
     ("state1", "action", "state2", "objective", "reward", "episode"),
 )
-
 
 def train():
     # create new uuid for this training session
@@ -360,16 +367,16 @@ def make_protein_states(sequences: typing.List[str], pdbs=None) -> torch.Tensor:
     ]
     quaternionss = [flatten_quaternions(compute_quaternions(pdb)) for pdb in pdbs]
     # scale distances and quaternions appropriately
-    distance_matrices = torch.tensor(distance_matrices).float()
+    distance_matrices = torch.tensor(distance_matrices, device=device).float()
     distance_matrices /= get_max_physical_protein_length_A(SEQUENCE_LEN)
-    quaternionss = torch.tensor(quaternionss).float()
+    quaternionss = torch.tensor(quaternionss, device=device).float()
     protein_states = torch.cat(sequences_enc, distance_matrices, quaternionss, axis=1)
     return protein_states
 
 
 def encode_sequence(sequence: str) -> torch.Tensor:
     # one-hot encode sequence
-    idx = torch.tensor([AMINO_ACIDS.index(aa) for aa in sequence], dtype=torch.long)
+    idx = torch.tensor([AMINO_ACIDS.index(aa) for aa in sequence], dtype=torch.long, device=device)
     idx_oh = F.one_hot(idx, num_classes=len(AMINO_ACIDS)).float().flatten()
     # check shape
     assert idx_oh.shape == (len(sequence) * len(AMINO_ACIDS),)
@@ -379,7 +386,7 @@ def encode_sequence(sequence: str) -> torch.Tensor:
 def encode_action(action: int) -> torch.Tensor:
     # one-hot encode action
     action_oh = (
-        F.one_hot(torch.tensor([action]), num_classes=ACTION_LENGTH).float().flatten()
+        F.one_hot(torch.tensor([action], device=device), num_classes=ACTION_LENGTH).float().flatten()
     )
     # check shape
     assert action_oh.shape == (ACTION_LENGTH,)
@@ -389,18 +396,18 @@ def encode_action(action: int) -> torch.Tensor:
 def encode_objective(objective: Objective) -> torch.Tensor:
     # one-hot encode each idx
     idx1_oh = (
-        F.one_hot(torch.tensor([objective.idx1]), num_classes=SEQUENCE_LEN)
+        F.one_hot(torch.tensor([objective.idx1], device=device), num_classes=SEQUENCE_LEN)
         .float()
         .flatten()
     )
     idx2_oh = (
-        F.one_hot(torch.tensor([objective.idx2]), num_classes=SEQUENCE_LEN)
+        F.one_hot(torch.tensor([objective.idx2], device=device), num_classes=SEQUENCE_LEN)
         .float()
         .flatten()
     )
     # concatenate these vectors and append the distance
     objective_enc = torch.cat(
-        (idx1_oh, idx2_oh, torch.tensor([objective.distance]).float())
+        (idx1_oh, idx2_oh, torch.tensor([objective.distance], device=device).float())
     )
     # check shape
     assert objective_enc.shape == (2 * SEQUENCE_LEN + 1,)

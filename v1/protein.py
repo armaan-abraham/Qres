@@ -23,8 +23,8 @@ torch.backends.cuda.matmul.allow_tf32 = True
 tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
 model = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1")
 
-if torch.cuda.is_available():
-    model = model.cuda()
+assert torch.cuda.is_available(), "You must be dumb to try to run this on a CPU"
+model = model.cuda()
 
 model.esm = model.esm.half()
 
