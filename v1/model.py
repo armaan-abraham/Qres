@@ -1,17 +1,10 @@
-import math
-import random
-from collections import namedtuple, deque
-
 import numpy as np
 import torch
 import torch.nn as nn
 
-from fold import AMINO_ACIDS
+from protein import AMINO_ACIDS
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-# TODO: convert the distance into a number from 0 to 1
 
 
 def sequence_onehot_length(sequence_length):

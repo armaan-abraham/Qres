@@ -1,6 +1,13 @@
 import io
 from collections import namedtuple
 from pathlib import Path
+import torch
+import time
+import matplotlib.pyplot as plt
+import seaborn as sns
+from transformers import AutoTokenizer, EsmForProteinFolding
+from transformers.models.esm.openfold_utils.protein import to_pdb, Protein as OFProtein
+from transformers.models.esm.openfold_utils.feats import atom14_to_atom37
 
 import numpy as np
 from Bio.PDB import PDBParser
@@ -10,6 +17,53 @@ from fold import infer_structure_batch
 PDB_CACHE_PATH = Path(__file__.parent / "pdb")
 AMINO_ACIDS = "ACDEFGHIKLMNPQRSTVWY"
 AMINO_ACID_LENGTH_ANGSTROM = 3.8
+
+torch.backends.cuda.matmul.allow_tf32 = True
+
+tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
+model = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1")
+
+if torch.cuda.is_available():
+    model = model.cuda()
+
+model.esm = model.esm.half()
+
+
+def infer_structure_batch(sequences):
+    tokenized_input = tokenizer(
+        sequences, return_tensors="pt", add_special_tokens=False
+    ).to(model.device)["input_ids"]
+    if torch.cuda.is_available():
+        tokenized_input = tokenized_input.cuda()
+    with torch.no_grad():
+        outputs = model(tokenized_input)
+    start = time.time()
+    outputs = convert_outputs_to_pdb(outputs)
+    print("convert outputs to pdb", time.time() - start)
+    return outputs
+
+
+def convert_outputs_to_pdb(outputs):
+    final_atom_positions = atom14_to_atom37(outputs["positions"][-1], outputs)
+    outputs = {k: v.to("cpu").numpy() for k, v in outputs.items()}
+    final_atom_positions = final_atom_positions.cpu().numpy()
+    final_atom_mask = outputs["atom37_atom_exists"]
+    pdbs = []
+    for i in range(outputs["aatype"].shape[0]):
+        aa = outputs["aatype"][i]
+        pred_pos = final_atom_positions[i]
+        mask = final_atom_mask[i]
+        resid = outputs["residue_index"][i] + 1
+        pred = OFProtein(
+            aatype=aa,
+            atom_positions=pred_pos,
+            atom_mask=mask,
+            residue_index=resid,
+            b_factors=outputs["plddt"][i],
+            chain_index=outputs["chain_index"][i] if "chain_index" in outputs else None,
+        )
+        pdbs.append(to_pdb(pred))
+    return pdbs
 
 
 def get_max_physical_protein_length_A(n_amino_acids):
@@ -22,8 +76,6 @@ def make_pdb_path(sequence):
     return PDB_CACHE_PATH / f"P{hashed_sequence}.pdb"
 
 
-# TODO: reward operates on the scaled distances
-
 def generate_pdbs(sequences):
     pdbs = infer_structure_batch(sequences)
     for sequence, pdb in zip(sequences, pdbs):
@@ -31,6 +83,7 @@ def generate_pdbs(sequences):
         with open(pdb_path, "w") as f:
             f.write(pdb)
     return pdbs
+
 
 def load_pdbs(sequences):
     # load pdbs from pdb cache
@@ -42,6 +95,7 @@ def load_pdbs(sequences):
                 pdbs.append(f.read())
         else:
             raise FileNotFoundError(f"Could not find PDB file for sequence {sequence}")
+
 
 # TODO check that this outputs angstroms
 def get_distance_matrix(pdb):
@@ -188,3 +242,23 @@ def quaternion_from_vectors(v1, v2):
     # Normalize the quaternion
     q /= np.linalg.norm(q)
     return q
+
+
+if __name__ == "__main__":
+    test_protein = "MGAGASAEEKHSRELEKKLKEDAEKDARTVKLLLLGAGESGKSTIVKQMKIIHQDGYSLEECLEFIAIIYGNTLQSILAIVRAMTTLNIQYGDSARQDDARKLMHMADTIEEGTMPKEMSDIIQRLWKDSGIQACFERASEYQLNDSAGYYLSDLERLVTPGYVPTEQDVLRSRVKTTGIIETQFSFKDLNFRMFDVGGQRSERKKWIHCFEGVTCIIFIAALSAYDMVLVEDDEVNRMHESLHLFNSICNHRYFATTSIVLFLNKKDVFFEKIKKAHLSICFPDYDGPNTYEDAGNYIKVQFLELNMRRDVKEIYSHMTCATDTQNVKFVFDAVTDIIIKENLKDCGLF"
+
+    with open("test_protein.txt", "w") as f:
+        # write the file
+        result = infer_structure_batch([test_protein[:50]])[0]
+        f.write(result)
+
+    exit()
+    tpp = []
+    for i in range(15):
+        test_proteins = [test_protein[:50] for j in range(i + 1)]
+        start = time.time()
+        infer_structure_batch(test_proteins)
+        tpp.append((time.time() - start) / (i + 1))
+    ax = sns.lineplot(x=range(len(tpp)), y=tpp)
+    # print to svg
+    plt.savefig("test.svg")
