@@ -9,45 +9,25 @@ from Bio.PDB import PDBParser
 
 from qres.fold import infer_structure_batch
 
-# PDB_CACHE_PATH = Path(__file__).parent / "pdb" 
 AMINO_ACIDS = list("ACDEFGHIKLMNPQRSTVWY")
 AMINO_ACID_LENGTH_ANGSTROM = 3.8
+
 
 def flattened_quaternions_length(n_amino_acids):
     return (n_amino_acids - 2) * 4
 
+
 def flattened_distance_matrix_length(n_amino_acids):
     return (n_amino_acids * (n_amino_acids + 1)) / 2 - n_amino_acids
+
 
 def get_max_physical_protein_length_A(n_amino_acids):
     return (n_amino_acids - 1) * AMINO_ACID_LENGTH_ANGSTROM
 
 
-def make_pdb_path(sequence):
-    # compute hash of sequence
-    hashed_sequence = hash(sequence)
-    return PDB_CACHE_PATH / f"P{hashed_sequence}.pdb"
-
-
 def generate_pdbs(sequences):
     pdbs = infer_structure_batch(sequences)
-    # for sequence, pdb in zip(sequences, pdbs):
-    #     pdb_path = make_pdb_path(sequence)
-    #     with open(pdb_path, "w") as f:
-    #         f.write(pdb)
     return pdbs
-
-
-def load_pdbs(sequences):
-    # load pdbs from pdb cache
-    pdbs = []
-    for sequence in sequences:
-        pdb_path = make_pdb_path(sequence)
-        if pdb_path.exists():
-            with open(pdb_path, "r") as f:
-                pdbs.append(f.read())
-        else:
-            raise FileNotFoundError(f"Could not find PDB file for sequence {sequence}")
 
 
 # TODO check that this outputs angstroms
