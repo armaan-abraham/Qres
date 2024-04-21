@@ -5,7 +5,7 @@ import typing
 import yaml
 from itertools import count
 from pathlib import Path
-from collections import deque
+from collections import deque, namedtuple
 
 
 import uuid
@@ -13,8 +13,8 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 
-from model import *
-from protein import *
+from qres.model import *
+from qres.protein import *
 
 COMMON_TRAINING_DIR = Path(__file__).parent / "training"
 
@@ -41,6 +41,7 @@ REWARDS_LOOKBACK = 50
 LOSS_TOL = 5e-2
 REWARD_SUM_TOL = 1e-2
 CHECKPOINT_INTERVAL = 1
+SAVE_TO_DISK = False
 
 if torch.cuda.is_available():
     print("GPU available")
@@ -57,6 +58,7 @@ Transition = namedtuple(
     ("state1", "action", "state2", "objective", "reward", "episode"),
 )
 
+
 def train():
     # create new uuid for this training session
     training_uuid = str(uuid.uuid4())
@@ -67,6 +69,31 @@ def train():
     TRAINING_DIR.mkdir()
     PARAMETERS_DIR = TRAINING_DIR / "parameters"
     PARAMETERS_DIR.mkdir()
+
+    # dump some metadata (such as date, time) about this run into a file in
+    # training dir
+    with open(TRAINING_DIR / "metadata.yaml", "w") as file:
+        yaml.dump(
+            {
+                "num_agents": NUM_AGENTS,
+                "num_episodes": NUM_EPISODES,
+                "sequence_len": SEQUENCE_LEN,
+                "batch_size": BATCH_SIZE,
+                "gamma": GAMMA,
+                "eps_start": EPS_START,
+                "eps_end": EPS_END,
+                "eps_decay": EPS_DECAY,
+                "tau": TAU,
+                "lr": LR,
+                "rewards_lookback": REWARDS_LOOKBACK,
+                "loss_tol": LOSS_TOL,
+                "reward_sum_tol": REWARD_SUM_TOL,
+                "checkpoint_interval": CHECKPOINT_INTERVAL,
+            },
+            file,
+            default_flow_style=False,
+            explicit_start=True,
+        )
 
     policy_net = DQN(SEQUENCE_LEN).to(device)
     target_net = DQN(SEQUENCE_LEN).to(device)
@@ -83,10 +110,12 @@ def train():
             for pdb, objective in zip(pdbs, objectives)
         ]
         episode_ids = torch.arange(NUM_AGENTS)  # these will be incremented
-        rewards_trajectory = [deque([], maxlen=REWARDS_LOOKBACK) for i in NUM_AGENTS]
+        rewards_trajectory = [
+            deque([], maxlen=REWARDS_LOOKBACK) for i in range(NUM_AGENTS)
+        ]
         # for storing episode information long-term
         episode_trajectories = []
-        for i in NUM_AGENTS:
+        for i in range(NUM_AGENTS):
             episode_trajectories.append(
                 {
                     "objective": decode_objective(objectives[i]),
@@ -99,6 +128,7 @@ def train():
                 {
                     "sequence": sequences[i],
                     "loss": loss[i],
+                    "reward": 0,
                 }
             )
         n_steps_by_episode = torch.zeros(NUM_AGENTS)
@@ -107,18 +137,18 @@ def train():
     for t in count():
         # this whole loop is torch no grad, besides the call to optimize_model
         with torch.no_grad():
-            actions = [
-                select_action(
-                    policy_net, states[i], objectives[i], n_steps_by_episode[i]
-                )
-                for i in NUM_AGENTS
-            ]
-
-            sequences_new = [act(states[i], actions[i]) for i in NUM_AGENTS]
-            pdbs_new = generate_pdbs(sequences_new)
-            states_new = torch.tensor(
-                make_protein_states(sequences_new, pdbs_new), device=device
+            actions = torch.stack(
+                [
+                    select_action(
+                        policy_net, states[i], objectives[i], n_steps_by_episode[i]
+                    )
+                    for i in range(NUM_AGENTS)
+                ]
             )
+
+            sequences_new = [act(states[i], actions[i]) for i in range(NUM_AGENTS)]
+            pdbs_new = generate_pdbs(sequences_new)
+            states_new = make_protein_states(sequences_new, pdbs_new)
 
             loss_new = [
                 get_objective_loss(pdb, objective)
@@ -126,7 +156,7 @@ def train():
             ]
             rewards = [loss - loss_new for loss, loss_new in zip(loss, loss_new)]
 
-            for i in NUM_AGENTS:
+            for i in range(NUM_AGENTS):
                 rewards_trajectory[i].append(rewards[i])
                 # save transition
                 transition = Transition(
@@ -149,20 +179,15 @@ def train():
                 ) or loss_new[i] < LOSS_TOL:
                     if loss_new[i] < LOSS_TOL:
                         episode_trajectories[i]["status"] = "success"
-                        episode_trajectories[i]["trajectory"].append(
-                            {
-                                "sequence": sequences_new[i],
-                                "loss": loss_new[i],
-                            }
-                        )
                     else:
                         episode_trajectories[i]["status"] = "failure"
-                        episode_trajectories[i]["trajectory"].append(
-                            {
-                                "sequence": sequences_new[i],
-                                "loss": loss_new[i],
-                            }
-                        )
+                    episode_trajectories[i]["trajectory"].append(
+                        {
+                            "sequence": sequences_new[i],
+                            "loss": loss_new[i],
+                            "reward": rewards[i],
+                        }
+                    )
                     n_episodes_completed += 1
                     # this agent is done its episode
                     sequences[i], objectives[i], states[i], pdbs[i] = (
@@ -188,6 +213,7 @@ def train():
                         {
                             "sequence": sequences[i],
                             "loss": loss[i],
+                            "reward": 0,
                         }
                     )
                 else:
@@ -195,6 +221,7 @@ def train():
                         {
                             "sequence": sequences_new[i],
                             "loss": loss_new[i],
+                            "reward": rewards[i],
                         }
                     )
                     # update current state for this agent
@@ -227,10 +254,19 @@ def train():
                     optimizer,
                     PARAMETERS_DIR / f"{t}.pt",
                 )
+                average_reward = 0
+                num_steps = 0
+                for trajectory in episode_trajectories:
+                    average_reward += sum(
+                        [step["reward"] for step in trajectory["trajectory"]]
+                    )
+                    num_steps += len(trajectory["trajectory"])
+                average_reward /= num_steps
                 # define training summary
                 training_summary = {
                     "num_episodes": n_episodes_completed,
                     "step": t,
+                    "average_reward": average_reward,
                     "episode_trajectories": episode_trajectories,
                 }
                 with open(TRAINING_DIR / "summary", "a") as file:
@@ -313,18 +349,22 @@ def act(state: torch.Tensor, action: torch.Tensor) -> str:
     Edits the sequence in state according to the action, returns the string
     representation of the new sequence.
 
-    Action is the encoded version.
+    Action is integer
     """
-    new_sequence = state.copy()[: sequence_onehot_length()].reshape(
-        (SEQUENCE_LEN, len(AMINO_ACIDS))
-    )
-    action = action.reshape((SEQUENCE_LEN, len(AMINO_ACIDS)))
-    residue_idx, new_amino_acid = torch.where(action)
+    new_sequence = list(decode_sequence(
+        state.clone().detach()[: sequence_onehot_length(SEQUENCE_LEN)]
+    ))
+    residue_idx, new_amino_acid = action // len(AMINO_ACIDS), action % len(AMINO_ACIDS)
     new_sequence[residue_idx] = AMINO_ACIDS[new_amino_acid]
-    return decode_sequence(new_sequence)
+    return ''.join(new_sequence)
 
 
-def select_action(model, protein_state, objective, n_steps_episode):
+def select_action(
+    model: torch.nn.Module,
+    protein_state: torch.Tensor,
+    objective: torch.Tensor,
+    n_steps_episode: int,
+) -> torch.Tensor:
     sample = random.random()
     eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(
         -1.0 * n_steps_episode / EPS_DECAY
@@ -333,10 +373,10 @@ def select_action(model, protein_state, objective, n_steps_episode):
         # t.max(1) will return the largest column value of each row.
         # second column on max result is index of where max element was
         # found, so we pick action with the larger expected reward.
-        return model(protein_state, objective).max(1).indices.view(1, 1)
+        return model(protein_state, objective).max(dim=0).indices
     else:
         return torch.tensor(
-            [[np.random.choice(action_length(SEQUENCE_LEN))]],
+            np.random.choice(action_length(SEQUENCE_LEN)),
             device=device,
             dtype=torch.long,
         )
@@ -360,23 +400,36 @@ def get_objective_loss(pdb, objective):
 def make_protein_states(sequences: typing.List[str], pdbs=None) -> torch.Tensor:
     pdbs = pdbs or generate_pdbs(sequences)
     sequences_enc = torch.cat(
-        [encode_sequence(sequence) for sequence in sequences], axis=0
+        [encode_sequence(sequence)[None, :] for sequence in sequences]
     )
-    distance_matrices = [
-        flatten_distance_matrix(get_distance_matrix(pdb)) for pdb in pdbs
-    ]
-    quaternionss = [flatten_quaternions(compute_quaternions(pdb)) for pdb in pdbs]
+    distance_matrices = np.array(
+        [flatten_distance_matrix(get_distance_matrix(pdb)) for pdb in pdbs]
+    )
     # scale distances and quaternions appropriately
     distance_matrices = torch.tensor(distance_matrices, device=device).float()
     distance_matrices /= get_max_physical_protein_length_A(SEQUENCE_LEN)
+    quaternionss = np.concatenate(
+        [flatten_quaternions(compute_quaternions(pdb))[None, :] for pdb in pdbs]
+    )
     quaternionss = torch.tensor(quaternionss, device=device).float()
-    protein_states = torch.cat(sequences_enc, distance_matrices, quaternionss, axis=1)
+    assert distance_matrices.shape == (
+        len(sequences),
+        flattened_distance_matrix_length(SEQUENCE_LEN),
+    )
+    assert quaternionss.shape == (
+        len(sequences),
+        flattened_quaternions_length(SEQUENCE_LEN),
+    )
+    assert sequences_enc.shape == (len(sequences), sequence_onehot_length(SEQUENCE_LEN))
+    protein_states = torch.cat((sequences_enc, distance_matrices, quaternionss), dim=1)
     return protein_states
 
 
 def encode_sequence(sequence: str) -> torch.Tensor:
     # one-hot encode sequence
-    idx = torch.tensor([AMINO_ACIDS.index(aa) for aa in sequence], dtype=torch.long, device=device)
+    idx = torch.tensor(
+        [AMINO_ACIDS.index(aa) for aa in sequence], dtype=torch.long, device=device
+    )
     idx_oh = F.one_hot(idx, num_classes=len(AMINO_ACIDS)).float().flatten()
     # check shape
     assert idx_oh.shape == (len(sequence) * len(AMINO_ACIDS),)
@@ -386,7 +439,9 @@ def encode_sequence(sequence: str) -> torch.Tensor:
 def encode_action(action: int) -> torch.Tensor:
     # one-hot encode action
     action_oh = (
-        F.one_hot(torch.tensor([action], device=device), num_classes=ACTION_LENGTH).float().flatten()
+        F.one_hot(torch.tensor([action], device=device), num_classes=ACTION_LENGTH)
+        .float()
+        .flatten()
     )
     # check shape
     assert action_oh.shape == (ACTION_LENGTH,)
@@ -396,12 +451,16 @@ def encode_action(action: int) -> torch.Tensor:
 def encode_objective(objective: Objective) -> torch.Tensor:
     # one-hot encode each idx
     idx1_oh = (
-        F.one_hot(torch.tensor([objective.idx1], device=device), num_classes=SEQUENCE_LEN)
+        F.one_hot(
+            torch.tensor([objective.idx1], device=device), num_classes=SEQUENCE_LEN
+        )
         .float()
         .flatten()
     )
     idx2_oh = (
-        F.one_hot(torch.tensor([objective.idx2], device=device), num_classes=SEQUENCE_LEN)
+        F.one_hot(
+            torch.tensor([objective.idx2], device=device), num_classes=SEQUENCE_LEN
+        )
         .float()
         .flatten()
     )
@@ -415,10 +474,12 @@ def encode_objective(objective: Objective) -> torch.Tensor:
 
 
 def encode_objectives(objectives: typing.List[Objective]) -> torch.Tensor:
-    return torch.cat([encode_objective(objective) for objective in objectives], axis=0)
+    return torch.cat([encode_objective(objective) for objective in objectives])
 
 
 def rand_initialize_sequence():
+    # note that AMINO_ACIDS is a string
+    # convert to list of characters
     return "".join(np.random.choice(AMINO_ACIDS, size=SEQUENCE_LEN))
 
 

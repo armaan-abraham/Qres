@@ -2,7 +2,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from protein import AMINO_ACIDS
+from qres.protein import (
+    AMINO_ACIDS,
+    flattened_distance_matrix_length,
+    flattened_quaternions_length,
+)
 
 
 def sequence_onehot_length(sequence_length):
@@ -10,7 +14,7 @@ def sequence_onehot_length(sequence_length):
 
 
 def objective_length(sequence_length):
-    return sequence_length * 2 + 1
+    return int(sequence_length * 2 + 1)
 
 
 def action_length(sequence_length):
@@ -22,13 +26,13 @@ class DQN(nn.Module):
         super().__init__()
         # define embedder of protein state, which takes in the sequence, distance matrix, and quaternions
         sequence_oh_len = sequence_onehot_length(sequence_length)
-        distances_size = sequence_length**2 / 2 - sequence_length
-        quaternions_size = (sequence_length - 1) * 4
-        protein_state_size = sequence_oh_len + distances_size + quaternions_size
-        protein_embedder_layer_dim = 2 ** (int(np.log2(protein_state_size)) + 1)
+        distances_len = flattened_distance_matrix_length(sequence_length)
+        quaternions_len = flattened_quaternions_length(sequence_length)
+        protein_state_len = int(sequence_oh_len + distances_len + quaternions_len)
+        protein_embedder_layer_dim = int(2 ** (int(np.log2(protein_state_len)) + 1))
         print("embedder_layer_dim:", protein_embedder_layer_dim)
         self.protein_embedder = nn.Sequential(
-            nn.Linear(protein_state_size, protein_embedder_layer_dim),
+            nn.Linear(protein_state_len, protein_embedder_layer_dim),
             nn.ReLU(),
             nn.Linear(protein_embedder_layer_dim, protein_embedder_layer_dim),
             nn.ReLU(),
@@ -42,8 +46,8 @@ class DQN(nn.Module):
         )
 
         # jointly embed the protein state and the objective
-        joint_embedder_layer_dim = 2 ** (
-            int(np.log2(protein_embedder_layer_dim + objective_len)) + 1
+        joint_embedder_layer_dim = int(
+            2 ** (int(np.log2(protein_embedder_layer_dim + objective_len)) + 1)
         )
         print("joint_embedder_layer_dim:", joint_embedder_layer_dim)
         self.joint_embedder = nn.Sequential(
@@ -67,7 +71,6 @@ class DQN(nn.Module):
                         self.protein_embedder(protein_state),
                         self.objective_embedder(objective),
                     ],
-                    dim=1,
                 )
             )
         )

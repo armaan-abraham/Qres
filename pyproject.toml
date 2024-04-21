@@ -15,6 +15,9 @@ transformers = "^4.40.0"
 biopython = "^1.83"
 
 
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.4"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
