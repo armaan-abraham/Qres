@@ -22,11 +22,6 @@ if torch.cuda.is_available():
 model.esm = model.esm.half()
 # model.trunk.set_chunk_size(64)
 
-def infer_structure(sequence):
-    with torch.no_grad():
-        output = model.infer_pdb(sequence)
-    return output
-
 def infer_structure_batch(sequences):
     tokenized_input = tokenizer(sequences, return_tensors="pt", add_special_tokens=False).to(model.device)["input_ids"]
     if torch.cuda.is_available():
@@ -62,13 +57,20 @@ def convert_outputs_to_pdb(outputs):
 
 if __name__ == "__main__":
     test_protein = "MGAGASAEEKHSRELEKKLKEDAEKDARTVKLLLLGAGESGKSTIVKQMKIIHQDGYSLEECLEFIAIIYGNTLQSILAIVRAMTTLNIQYGDSARQDDARKLMHMADTIEEGTMPKEMSDIIQRLWKDSGIQACFERASEYQLNDSAGYYLSDLERLVTPGYVPTEQDVLRSRVKTTGIIETQFSFKDLNFRMFDVGGQRSERKKWIHCFEGVTCIIFIAALSAYDMVLVEDDEVNRMHESLHLFNSICNHRYFATTSIVLFLNKKDVFFEKIKKAHLSICFPDYDGPNTYEDAGNYIKVQFLELNMRRDVKEIYSHMTCATDTQNVKFVFDAVTDIIIKENLKDCGLF"
+
+    with open("test_protein.txt", "w") as f:
+        # write the file
+        result = infer_structure_batch([test_protein[:50]])[0]
+        f.write(result)
+
+
+    exit()
     tpp = []
     for i in range(15):
         test_proteins = [test_protein[:50] for j in range(i+1)]
         start = time.time()
         infer_structure_batch(test_proteins)
         tpp.append((time.time() - start) / (i+1))
-    print(tpp)
     ax = sns.lineplot(x=range(len(tpp)), y=tpp)
     # print to svg
     plt.savefig("test.svg")
