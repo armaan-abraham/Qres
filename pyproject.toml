@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "qres"
+version = "0.1.0"
+description = ""
+authors = ["Armaan Abraham <armaan.abraham@hotmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+numpy = "^1.26.4"
+torch = "^2.2.2"
+seaborn = "^0.13.2"
+matplotlib = "^3.8.4"
+transformers = "^4.40.0"
+biopython = "^1.83"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

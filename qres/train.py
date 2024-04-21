@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from model import *
 from protein import *
 
-COMMON_TRAINING_DIR = Path(__file__.parent) / "training"
+COMMON_TRAINING_DIR = Path(__file__).parent / "training"
 
 # BATCH_SIZE is the number of transitions sampled from the replay buffer
 BATCH_SIZE = 128

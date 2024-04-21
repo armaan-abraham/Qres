@@ -12,9 +12,8 @@ from transformers.models.esm.openfold_utils.feats import atom14_to_atom37
 import numpy as np
 from Bio.PDB import PDBParser
 
-from fold import infer_structure_batch
 
-PDB_CACHE_PATH = Path(__file__.parent / "pdb")
+PDB_CACHE_PATH = Path(__file__).parent / "pdb"
 AMINO_ACIDS = "ACDEFGHIKLMNPQRSTVWY"
 AMINO_ACID_LENGTH_ANGSTROM = 3.8
 
