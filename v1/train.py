@@ -33,7 +33,8 @@ SEQUENCE_LEN = 25
 ACTION_LENGTH = action_length(SEQUENCE_LEN)
 OBJECTIVE_LENGTH = objective_length(SEQUENCE_LEN)
 REWARDS_LOOKBACK = 50
-EPISODE_TOL = 5e-2
+LOSS_TOL = 5e-2
+REWARD_SUM_TOL = 1e-2
 
 Objective = namedtuple("Objective", ("idx1", "idx2", "distance"))
 
@@ -58,18 +59,21 @@ class ReplayMemory:
     def __len__(self):
         return len(self.memory)
 
+
 def decode_sequence(sequence: torch.Tensor) -> str:
     sequence = sequence.reshape((SEQUENCE_LEN, len(AMINO_ACIDS)))
     idx = torch.argmax(sequence, axis=1)
     return "".join([AMINO_ACIDS[i] for i in idx])
 
+
 def act(state: torch.Tensor, action: torch.Tensor) -> str:
-    new_sequence = state.copy()[:sequence_onehot_length()].reshape((SEQUENCE_LEN, len(AMINO_ACIDS)))
+    new_sequence = state.copy()[: sequence_onehot_length()].reshape(
+        (SEQUENCE_LEN, len(AMINO_ACIDS))
+    )
     action = action.reshape((SEQUENCE_LEN, len(AMINO_ACIDS)))
     residue_idx, new_amino_acid = torch.where(action)
     new_sequence[residue_idx] = AMINO_ACIDS[new_amino_acid]
     return decode_sequence(new_sequence)
-
 
 
 def select_action(protein_state, objective):
@@ -92,24 +96,20 @@ def select_action(protein_state, objective):
             dtype=torch.long,
         )
 
+
 def decode_objective(objective: torch.Tensor) -> Objective:
     idx1 = torch.argmax(objective[:SEQUENCE_LEN])
-    idx2 = torch.argmax(objective[SEQUENCE_LEN:2*SEQUENCE_LEN])
+    idx2 = torch.argmax(objective[SEQUENCE_LEN : 2 * SEQUENCE_LEN])
     distance = objective[-1]
     return Objective(idx1=idx1, idx2=idx2, distance=distance)
 
-def calc_rewards(pdbs1, pdbs2, objectives):
+
+def get_objective_loss(pdb, objective):
     max_length = get_max_physical_protein_length_A(SEQUENCE_LEN)
-    rewards = []
-    for pdb1, pdb2, objective in zip(pdbs1, pdbs2, objectives):
-        dm1, dm2 = get_distance_matrix(pdb1), get_distance_matrix(pdb2)
-        objective = decode_objective(objective)
-        dist1 = dm1[objective.idx1][objective.idx2]
-        dist2 = dm2[objective.idx1][objective.idx2]
-        loss1 = (dist1 / max_length - objective.distance) ** 2
-        loss2 = (dist2 / max_length - objective.distance) ** 2
-        rewards.append(loss1 - loss2)
-    return rewards
+    objective = decode_objective(objective)
+    dm = get_distance_matrix(pdb)
+    dist = dm[objective.idx1][objective.idx2]
+    return (dist / max_length - objective.distance) ** 2
 
 def optimize_model():
     if len(memory) < BATCH_SIZE:
@@ -226,7 +226,9 @@ def rand_initialize_objective():
 
 def rand_initialize_episodes(num_episodes: int):
     sequences = [rand_initialize_sequence() for i in range(num_episodes)]
-    objectives = [rand_initialize_objective() for i in range(num_episodes)]
+    objectives = [
+        encode_objective(rand_initialize_objective()) for i in range(num_episodes)
+    ]
     pdbs = generate_pdbs(sequences)
     states = make_protein_states(sequences, pdbs)
     return sequences, objectives, states, pdbs
@@ -242,8 +244,9 @@ memory = ReplayMemory(10000)
 steps_done = 0
 
 sequences, objectives, states, pdbs = rand_initialize_episodes(NUM_AGENTS)
-episode_ids = torch.arange(NUM_AGENTS) # these will be incremented
-rewards_trajectory = torch.Tensor(NUM_AGENTS, REWARDS_LOOKBACK).fill_(float("nan"))
+loss = [get_objective_loss(pdb, objective) for pdb, objective in zip(pdbs, objectives)]
+episode_ids = torch.arange(NUM_AGENTS)  # these will be incremented
+rewards_trajectory = [deque([], maxlen=REWARDS_LOOKBACK) for i in NUM_AGENTS]
 
 
 for t in count():
@@ -251,27 +254,28 @@ for t in count():
 
     sequences_new = [act(states[i], actions[i]) for i in NUM_AGENTS]
     pdbs_new = generate_pdbs(sequences_new)
-    states_new = torch.tensor(make_protein_states(sequences_new, pdbs_new), device=device)
+    states_new = torch.tensor(
+        make_protein_states(sequences_new, pdbs_new), device=device
+    )
 
-    rewards = torch.tensor(calc_rewards(pdbs, pdbs_new, objectives), device=device)
-
+    loss_new = [get_objective_loss(pdb, objective) for pdb, objective in zip(pdbs_new, objectives)]
+    rewards = [loss - loss_new for loss, loss_new in zip(loss, loss_new)]
 
     for i in NUM_AGENTS:
+        rewards_trajectory[i].append(rewards[i])
+        memory.push(states[i], actions[i], states_new[i], objectives[i], rewards[i])
+        if (len(rewards_trajectory) == REWARDS_LOOKBACK and sum(rewards_trajectory[i]) < REWARD_SUM_TOL) or loss_new[i] < LOSS_TOL:
+
+            sequences[i], objectives[i], states[i], pdbs[i] = rand_initialize_episodes(1)
+            episode_ids[i] += 1
+            rewards_trajectory[i].clear()
 
 
 
-    if terminated:
-        next_state = None
-    else:
-        next_state = torch.tensor(
-            observation, dtype=torch.float32, device=device
-        ).unsqueeze(0)
 
-    # Store the transition in memory
-    memory.push(state, action, next_state, reward)
+    
 
-    # Move to the next state
-    state = next_state
+    states = states_new
 
     # Perform one step of the optimization (on the policy network)
     optimize_model()
@@ -286,4 +290,3 @@ for t in count():
         ] * TAU + target_net_state_dict[key] * (1 - TAU)
     target_net.load_state_dict(target_net_state_dict)
 
-    # TODO: stopping condition
