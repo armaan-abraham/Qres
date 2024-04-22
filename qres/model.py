@@ -29,48 +29,25 @@ class DQN(nn.Module):
         distances_len = flattened_distance_matrix_length(sequence_length)
         quaternions_len = flattened_quaternions_length(sequence_length)
         protein_state_len = int(sequence_oh_len + distances_len + quaternions_len)
-        protein_embedder_layer_dim = int(2 ** (int(np.log2(protein_state_len)) + 1))
+        # protein_embedder_layer_dim = int(2 ** (int(np.log2(protein_state_len)) + 1))
+        protein_embedder_layer_dim = 256
         print("embedder_layer_dim:", protein_embedder_layer_dim)
         self.protein_embedder = nn.Sequential(
             nn.Linear(protein_state_len, protein_embedder_layer_dim),
             nn.ReLU(),
             nn.Linear(protein_embedder_layer_dim, protein_embedder_layer_dim),
             nn.ReLU(),
-        )
-
-        objective_len = objective_length(sequence_length)
-
-        # define embedder of objective
-        self.objective_embedder = nn.Sequential(
-            nn.Linear(objective_len, objective_len), nn.ReLU()
-        )
-
-        # jointly embed the protein state and the objective
-        joint_embedder_layer_dim = int(
-            2 ** (int(np.log2(protein_embedder_layer_dim + objective_len)) + 1)
-        )
-        print("joint_embedder_layer_dim:", joint_embedder_layer_dim)
-        self.joint_embedder = nn.Sequential(
-            nn.Linear(
-                protein_embedder_layer_dim + objective_len, joint_embedder_layer_dim
-            ),
+            nn.Linear(protein_embedder_layer_dim, protein_embedder_layer_dim),
             nn.ReLU(),
-            nn.Linear(joint_embedder_layer_dim, joint_embedder_layer_dim),
+            nn.Linear(protein_embedder_layer_dim, protein_embedder_layer_dim),
             nn.ReLU(),
         )
 
         # define the Q function
         action_len = action_length(sequence_length)
-        self.q_function = nn.Linear(joint_embedder_layer_dim, action_len)
+        self.q_function = nn.Linear(protein_embedder_layer_dim, action_len)
 
-    def forward(self, protein_state, objective):
-        return self.q_function(
-            self.joint_embedder(
-                torch.cat(
-                    [
-                        self.protein_embedder(protein_state),
-                        self.objective_embedder(objective),
-                    ],
-                )
-            )
-        )
+    def forward(self, protein_state):
+        assert protein_state.shape[1] == self.protein_embedder[0].in_features
+        protein_embedding = self.protein_embedder(protein_state)
+        return self.q_function(protein_embedding)

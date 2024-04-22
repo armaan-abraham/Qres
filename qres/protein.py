@@ -106,9 +106,48 @@ def get_amino_acids_from_pdb(pdb):
         for chain in model:
             for residue in chain:
                 if residue.id[0] == " ":  # Filter out heteroatoms and water
-                    amino_acids.append((chain.id, residue.resname, residue.id[1]))
+                    amino_acids.append(residue.resname)
 
     return amino_acids
+
+def overall_confidence_from_pdb(pdb):
+    """
+    Parses PDB format data from a string and calculates the overall confidence of the structure
+    based on the average B-factor of the atoms.
+
+    Args:
+        pdb_data (str): PDB file contents as a single string.
+
+    Returns:
+        float: The average B-factor, representing the overall confidence.
+    """
+    # Create a StringIO object from the string data
+    import io
+    pdb_io = io.StringIO(pdb)
+
+    # Initialize the PDB parser
+    parser = PDBParser(QUIET=True)
+
+    # Use the parser to create a structure object from the StringIO object
+    structure = parser.get_structure('PDB_structure', pdb_io)
+
+    # Collect B-factors
+    b_factors = []
+    for model in structure:
+        for chain in model:
+            for residue in chain:
+                for atom in residue:
+                    b_factors.append(atom.get_bfactor())
+
+    # Close the StringIO object
+    pdb_io.close()
+
+    # Compute the average B-factor
+    if b_factors:
+        average_b_factor = sum(b_factors) / len(b_factors)
+        return average_b_factor
+    else:
+        return None  # No B-factors found
 
 
 def compute_quaternions(pdb):

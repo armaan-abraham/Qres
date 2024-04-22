@@ -18,8 +18,10 @@ from qres.protein import *
 
 COMMON_TRAINING_DIR = Path(__file__).parent / "training"
 
+# TODO: add reward for stability
+
 # BATCH_SIZE is the number of transitions sampled from the replay buffer
-BATCH_SIZE = 128
+BATCH_SIZE = 256
 # GAMMA is the discount factor as mentioned in the previous section
 GAMMA = 0.99
 # EPS_START is the starting value of epsilon
@@ -32,16 +34,16 @@ EPS_DECAY = 1000
 TAU = 0.005
 # LR is the learning rate of the ``AdamW`` optimizer
 LR = 1e-4
-NUM_AGENTS = 10
-NUM_EPISODES = 600
-SEQUENCE_LEN = 25
+NUM_AGENTS = 12
+NUM_EPISODES = 1500
+SEQUENCE_LEN = 30
 ACTION_LENGTH = action_length(SEQUENCE_LEN)
 OBJECTIVE_LENGTH = objective_length(SEQUENCE_LEN)
-REWARDS_LOOKBACK = 50
-LOSS_TOL = 5e-2
-REWARD_SUM_TOL = 1e-2
-CHECKPOINT_INTERVAL = 1
-SAVE_TO_DISK = False
+REWARDS_LOOKBACK = 250
+LOSS_TOL = 0.05
+REWARD_SUM_TOL = LOSS_TOL
+CHECKPOINT_INTERVAL = 5
+SAVE_INTERVAL = 1000
 
 if torch.cuda.is_available():
     print("GPU available")
@@ -57,6 +59,20 @@ Transition = namedtuple(
     "Transition",
     ("state1", "action", "state2", "objective", "reward", "episode"),
 )
+
+
+class ReplayMemory:
+    def __init__(self, capacity):
+        self.memory_deque = deque([], maxlen=capacity)
+
+    def push(self, transition):
+        self.memory_deque.append(transition)
+
+    def sample(self, batch_size):
+        return random.sample(self.memory_deque, batch_size)
+
+    def __len__(self):
+        return len(self.memory_deque)
 
 
 def train():
@@ -91,8 +107,6 @@ def train():
                 "checkpoint_interval": CHECKPOINT_INTERVAL,
             },
             file,
-            default_flow_style=False,
-            explicit_start=True,
         )
 
     policy_net = DQN(SEQUENCE_LEN).to(device)
@@ -105,10 +119,9 @@ def train():
     with torch.no_grad():
         # states for the agents
         sequences, objectives, states, pdbs = rand_initialize_episodes(NUM_AGENTS)
-        loss = [
-            get_objective_loss(pdb, objective)
-            for pdb, objective in zip(pdbs, objectives)
-        ]
+        loss = []
+        for i in range(NUM_AGENTS):
+           loss.append(get_objective_loss(pdbs[i], objectives[i]))
         episode_ids = torch.arange(NUM_AGENTS)  # these will be incremented
         rewards_trajectory = [
             deque([], maxlen=REWARDS_LOOKBACK) for i in range(NUM_AGENTS)
@@ -118,16 +131,16 @@ def train():
         for i in range(NUM_AGENTS):
             episode_trajectories.append(
                 {
-                    "objective": decode_objective(objectives[i]),
+                    "objective": decode_objective(objectives[i], as_torch=False),
                     "trajectory": [],
                     "status": "incomplete",
-                    "episode_id": episode_ids[i],
+                    "episode_id": episode_ids[i].item(),
                 },
             )
             episode_trajectories[i]["trajectory"].append(
                 {
                     "sequence": sequences[i],
-                    "loss": loss[i],
+                    "loss": loss[i].item(),
                     "reward": 0,
                 }
             )
@@ -168,24 +181,24 @@ def train():
                     episode_ids[i],
                 )
                 memory.push(transition)
-                write_transition_to_csv(
-                    transition,
-                    TRAINING_DIR / f"{episode_ids[i]}.csv",
-                )
+                # write_transition_to_csv(
+                #     transition,
+                #     TRAINING_DIR / f"transitions.csv",
+                # )
 
                 if (
                     len(rewards_trajectory[i]) == REWARDS_LOOKBACK
                     and sum(rewards_trajectory[i]) < REWARD_SUM_TOL
                 ) or loss_new[i] < LOSS_TOL:
                     if loss_new[i] < LOSS_TOL:
-                        episode_trajectories[i]["status"] = "success"
+                        episode_trajectories[episode_ids[i]]["status"] = "success"
                     else:
-                        episode_trajectories[i]["status"] = "failure"
-                    episode_trajectories[i]["trajectory"].append(
+                        episode_trajectories[episode_ids[i]]["status"] = "failure"
+                    episode_trajectories[episode_ids[i]]["trajectory"].append(
                         {
                             "sequence": sequences_new[i],
-                            "loss": loss_new[i],
-                            "reward": rewards[i],
+                            "loss": loss_new[i].item(),
+                            "reward": rewards[i].item(),
                         }
                     )
                     n_episodes_completed += 1
@@ -203,25 +216,28 @@ def train():
 
                     episode_trajectories.append(
                         {
-                            "objective": decode_objective(objectives[i]),
+                            "objective": decode_objective(
+                                objectives[i], as_torch=False
+                            ),
                             "trajectory": [],
                             "status": "incomplete",
-                            "episode_id": episode_ids[i],
+                            "episode_id": episode_ids[i].item(),
                         },
                     )
-                    episode_trajectories[i]["trajectory"].append(
+                    assert len(episode_trajectories) == episode_ids[i] + 1
+                    episode_trajectories[episode_ids[i]]["trajectory"].append(
                         {
                             "sequence": sequences[i],
-                            "loss": loss[i],
+                            "loss": loss[i].item(),
                             "reward": 0,
                         }
                     )
                 else:
-                    episode_trajectories[i]["trajectory"].append(
+                    episode_trajectories[episode_ids[i]]["trajectory"].append(
                         {
                             "sequence": sequences_new[i],
-                            "loss": loss_new[i],
-                            "reward": rewards[i],
+                            "loss": loss_new[i].item(),
+                            "reward": rewards[i].item(),
                         }
                     )
                     # update current state for this agent
@@ -247,13 +263,6 @@ def train():
 
             if t % CHECKPOINT_INTERVAL == 0:
                 print("Step:", t)
-                # save model parameters
-                save_model(
-                    policy_net,
-                    target_net,
-                    optimizer,
-                    PARAMETERS_DIR / f"{t}.pt",
-                )
                 average_reward = 0
                 num_steps = 0
                 for trajectory in episode_trajectories:
@@ -261,28 +270,41 @@ def train():
                         [step["reward"] for step in trajectory["trajectory"]]
                     )
                     num_steps += len(trajectory["trajectory"])
-                average_reward /= num_steps
+                average_reward = average_reward / num_steps
                 # define training summary
                 training_summary = {
-                    "num_episodes": n_episodes_completed,
-                    "step": t,
-                    "average_reward": average_reward,
-                    "episode_trajectories": episode_trajectories,
+                    t: {
+                        "n_episodes_completed": n_episodes_completed,
+                        "average_reward": average_reward,
+                    }
                 }
-                with open(TRAINING_DIR / "summary", "a") as file:
+                with open(TRAINING_DIR / "trajectories.yaml", "w") as file:
+                    yaml.dump(
+                        episode_trajectories,
+                        file,
+                    )
+                with open(TRAINING_DIR / "summary.yaml", "a") as file:
                     yaml.dump(
                         training_summary,
                         file,
-                        default_flow_style=False,
-                        explicit_start=True,
                     )
+            
+            if t % SAVE_INTERVAL == 0:
+                save_model(
+                    policy_net,
+                    target_net,
+                    optimizer,
+                    PARAMETERS_DIR / f"checkpoint_{t}.pt",
+                )
 
             # check if our overall training is done
             if n_episodes_completed >= NUM_EPISODES:
                 break
 
 
-def optimize_model(memory, policy_net, target_net, optimizer):
+def optimize_model(
+    memory: ReplayMemory, policy_net: DQN, target_net: DQN, optimizer: optim.AdamW
+) -> None:
     if len(memory) < BATCH_SIZE:
         return
 
@@ -290,16 +312,23 @@ def optimize_model(memory, policy_net, target_net, optimizer):
 
     batch = Transition(*zip(*transitions))
 
-    states1 = torch.cat(batch.state1)
-    states2 = torch.cat(batch.state2)
-    objectives = torch.cat(batch.objective)
-    actions = torch.cat(batch.action)
-    rewards = torch.cat(batch.reward)
+    states1 = torch.stack(batch.state1)
+    states2 = torch.stack(batch.state2)
+    objectives = torch.stack(batch.objective)
+    actions = torch.stack(batch.action)
+    rewards = torch.stack(batch.reward)
+    assert states1.shape == (BATCH_SIZE, protein_state_length())
+    assert states2.shape == (BATCH_SIZE, protein_state_length())
+    assert objectives.shape == (BATCH_SIZE, OBJECTIVE_LENGTH)
+    assert actions.shape == (BATCH_SIZE,)
+    assert rewards.shape == (BATCH_SIZE,)
 
-    Q = policy_net(states1, objectives).gather(1, actions).squeeze()
+    # Q = policy_net(states1, objectives).gather(1, actions[None, :]).squeeze()
+    Q = policy_net(states1).gather(1, actions[None, :]).squeeze()
+    
 
     with torch.no_grad():
-        V_next = target_net(states2, objectives).max(1).values
+        V_next = target_net(states2).max(1).values
 
     # Bellman equation
     Q_expected = (V_next * GAMMA) + rewards
@@ -315,20 +344,6 @@ def optimize_model(memory, policy_net, target_net, optimizer):
     # In-place gradient clipping
     torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
     optimizer.step()
-
-
-class ReplayMemory:
-    def __init__(self, capacity):
-        self.memory_deque = deque([], maxlen=capacity)
-
-    def push(self, transition):
-        self.memory_deque.append(transition)
-
-    def sample(self, batch_size):
-        return random.sample(self.memory_deque, batch_size)
-
-    def __len__(self):
-        return len(self.memory_deque)
 
 
 def write_transition_to_csv(transition, path):
@@ -351,12 +366,12 @@ def act(state: torch.Tensor, action: torch.Tensor) -> str:
 
     Action is integer
     """
-    new_sequence = list(decode_sequence(
-        state.clone().detach()[: sequence_onehot_length(SEQUENCE_LEN)]
-    ))
+    new_sequence = list(
+        decode_sequence(state.clone().detach()[: sequence_onehot_length(SEQUENCE_LEN)])
+    )
     residue_idx, new_amino_acid = action // len(AMINO_ACIDS), action % len(AMINO_ACIDS)
     new_sequence[residue_idx] = AMINO_ACIDS[new_amino_acid]
-    return ''.join(new_sequence)
+    return "".join(new_sequence)
 
 
 def select_action(
@@ -373,7 +388,11 @@ def select_action(
         # t.max(1) will return the largest column value of each row.
         # second column on max result is index of where max element was
         # found, so we pick action with the larger expected reward.
-        return model(protein_state, objective).max(dim=0).indices
+        # Q = model(protein_state[None, :], objective[None, :])
+        Q = model(protein_state[None, :])
+        Q_max_action = torch.max(Q, 1).indices
+        assert Q_max_action.shape == (1,)
+        return Q_max_action[0]
     else:
         return torch.tensor(
             np.random.choice(action_length(SEQUENCE_LEN)),
@@ -382,34 +401,35 @@ def select_action(
         )
 
 
-def decode_objective(objective: torch.Tensor) -> Objective:
+def decode_objective(objective: torch.Tensor, as_torch=True) -> Objective:
     idx1 = torch.argmax(objective[:SEQUENCE_LEN])
     idx2 = torch.argmax(objective[SEQUENCE_LEN : 2 * SEQUENCE_LEN])
     distance = objective[-1]
-    return Objective(idx1=idx1, idx2=idx2, distance=distance)
+    if as_torch:
+        return Objective(idx1=idx1, idx2=idx2, distance=distance)
+    return Objective(idx1=idx1.item(), idx2=idx2.item(), distance=distance.item())
 
 
 def get_objective_loss(pdb, objective):
+    return torch.tensor(1 - overall_confidence_from_pdb(pdb), device=device)
     max_length = get_max_physical_protein_length_A(SEQUENCE_LEN)
     objective = decode_objective(objective)
     dm = get_distance_matrix(pdb)
     dist = dm[objective.idx1][objective.idx2]
-    return (dist / max_length - objective.distance) ** 2
+    return torch.abs(dist / max_length - objective.distance)
 
 
 def make_protein_states(sequences: typing.List[str], pdbs=None) -> torch.Tensor:
     pdbs = pdbs or generate_pdbs(sequences)
-    sequences_enc = torch.cat(
-        [encode_sequence(sequence)[None, :] for sequence in sequences]
-    )
+    sequences_enc = torch.stack([encode_sequence(sequence) for sequence in sequences])
     distance_matrices = np.array(
         [flatten_distance_matrix(get_distance_matrix(pdb)) for pdb in pdbs]
     )
     # scale distances and quaternions appropriately
     distance_matrices = torch.tensor(distance_matrices, device=device).float()
     distance_matrices /= get_max_physical_protein_length_A(SEQUENCE_LEN)
-    quaternionss = np.concatenate(
-        [flatten_quaternions(compute_quaternions(pdb))[None, :] for pdb in pdbs]
+    quaternionss = np.stack(
+        [flatten_quaternions(compute_quaternions(pdb)) for pdb in pdbs]
     )
     quaternionss = torch.tensor(quaternionss, device=device).float()
     assert distance_matrices.shape == (
@@ -423,6 +443,14 @@ def make_protein_states(sequences: typing.List[str], pdbs=None) -> torch.Tensor:
     assert sequences_enc.shape == (len(sequences), sequence_onehot_length(SEQUENCE_LEN))
     protein_states = torch.cat((sequences_enc, distance_matrices, quaternionss), dim=1)
     return protein_states
+
+
+def protein_state_length():
+    return (
+        sequence_onehot_length(SEQUENCE_LEN)
+        + flattened_distance_matrix_length(SEQUENCE_LEN)
+        + flattened_quaternions_length(SEQUENCE_LEN)
+    )
 
 
 def encode_sequence(sequence: str) -> torch.Tensor:
@@ -469,12 +497,12 @@ def encode_objective(objective: Objective) -> torch.Tensor:
         (idx1_oh, idx2_oh, torch.tensor([objective.distance], device=device).float())
     )
     # check shape
-    assert objective_enc.shape == (2 * SEQUENCE_LEN + 1,)
+    assert objective_enc.shape == (OBJECTIVE_LENGTH,)
     return objective_enc
 
 
 def encode_objectives(objectives: typing.List[Objective]) -> torch.Tensor:
-    return torch.cat([encode_objective(objective) for objective in objectives])
+    return torch.stack([encode_objective(objective) for objective in objectives])
 
 
 def rand_initialize_sequence():
@@ -484,15 +512,27 @@ def rand_initialize_sequence():
 
 
 def rand_initialize_objective():
-    idx1 = np.random.choice(SEQUENCE_LEN - 2)
-    idx2 = np.random.choice(np.arange(idx1 + 2, SEQUENCE_LEN))
+    distance_category = np.random.choice([0, 1, 2], p=[0, 0.5, 0.5])
+    # if distance_category == 0:
+    #     idx_sep_min = 3
+    #     idx_sep_max = 6
+    if distance_category == 1:
+        idx_sep_min = 7
+        idx_sep_max = 16
+    else:
+        idx_sep_min = 17
+        idx_sep_max = SEQUENCE_LEN - 1
+
+    idx_sep = np.random.choice(np.arange(idx_sep_min, idx_sep_max))
+    idx1 = np.random.choice(np.arange(0, SEQUENCE_LEN - idx_sep - 1))
+    idx2 = idx1 + idx_sep
+    # based on empiral radius of gyration (exponent is actually 0.34)
+    distance = np.random.uniform(2.5, min(2 * 2.02 * idx_sep ** 0.5, idx_sep * 3.8))
     max_length = get_max_physical_protein_length_A(SEQUENCE_LEN)
     return Objective(
         idx1=idx1,
         idx2=idx2,
-        distance=np.random.uniform(
-            5 / max_length, (idx2 - idx1) * AMINO_ACID_LENGTH_ANGSTROM / max_length
-        ),
+        distance=distance / max_length,
     )
 
 
