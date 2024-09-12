@@ -1,4 +1,4 @@
-# Q-residue: Generative model for the residue distance-constrained design of proteins
+# Qres: Generative model for the residue distance-constrained design of proteins
 
 - We have a relatively easy-to-verify objective in silico for a protein, which
 are ranges of distances between one or more residues or groups of residues. We
