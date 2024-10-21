@@ -7,7 +7,7 @@ predict the structure with AF2 or ESM-fold, and then calculate these residue
 distances. For example we may want residue 1 and 5 to be 8-10A apart.
 - But we want some way of generating proteins that satisfy this constraint. This
 is where the generative model comes in. We introduce a solution, first using an
-RL agent and then using a GFlowNet, that solves this problem by iteratively
+RL agent, that solves this problem by iteratively
 proposing solutions, which are then verified in silico.
 - In our base case, we use ESM-fold with efficient options to allow quick
 structure prediction. The first generative model will be an RL agent with a deep
