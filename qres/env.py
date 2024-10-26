@@ -13,7 +13,6 @@ model = model.cuda()
 
 model.esm = model.esm.half()
 
-
 def infer_structure_batch(sequences):
     tokenized_input = tokenizer(
         sequences, return_tensors="pt", add_special_tokens=False
