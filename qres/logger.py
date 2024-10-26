@@ -15,12 +15,15 @@ class Logger:
     def put(self, **kwargs):
         self.attrs.update(kwargs)
 
-    def log(self):
-        if config.wandb_enabled:
-            self.wandb.log(self.attrs)
-        else:
-            pprint(self.attrs)
+    def push_attrs(self):
+        self.log(**self.attrs)
         self.attrs = {}
+
+    def log(self, **kwargs):
+        if config.wandb_enabled:
+            self.wandb.log(kwargs)
+        else:
+            pprint(kwargs)
 
     def finish(self):
         if config.wandb_enabled:

@@ -1,6 +1,6 @@
 import torch
 import random
-from qres.structure_prediction import AMINO_ACIDS, N_AMINO_ACIDS, StructurePredictor
+from qres.structure_prediction import AMINO_ACIDS, N_AMINO_ACIDS, StructurePredictorPool
 from qres.config import config
 from jaxtyping import Float, Bool
 from typing import Tuple
@@ -12,12 +12,16 @@ TODO:
 
 """
 
-
-
 class Environment:
-    def __init__(self):
+    def __init__(self, structure_predictor_pool=None):
         if not config.fake_structure_prediction:
-            self.structure_predictor = StructurePredictor()
+            if structure_predictor_pool is None:
+                # Default to using all available GPUs
+                num_gpus = torch.cuda.device_count()
+                device_ids = list(range(num_gpus))
+                self.structure_predictor_pool = StructurePredictorPool(num_workers=num_gpus, device_ids=device_ids)
+            else:
+                self.structure_predictor_pool = structure_predictor_pool
         
         self.states = torch.stack(
             [self._init_state() for _ in range(config.batch_size)]
@@ -44,7 +48,7 @@ class Environment:
     def get_states(self) -> Float[torch.Tensor, "batch (seq residue amino)"]:
         return self.states.clone()
     
-    def parse_states(
+    def parse_seqs_from_states(
         self, state: Float[torch.Tensor, "batch (seq residue amino)"]
     ) -> Tuple[
         Float[torch.Tensor, "batch (residue amino)"],
@@ -65,11 +69,11 @@ class Environment:
         Float[torch.Tensor, "batch 1"],
         Bool[torch.Tensor, "batch 1"],
     ]:
-        init_seqs, seqs = self.parse_states(states)
-        
+        init_seqs, seqs = self.parse_seqs_from_states(states)
+
         next_seqs = self.apply_actions(seqs, actions)
-        
-        rewards = self.calculate_rewards(init_seqs, next_seqs)
+
+        next_states, rewards = self.seqs_to_states_rewards(init_seqs, next_seqs)
         
         dones = self.steps_done >= config.max_episode_length
         
@@ -80,7 +84,7 @@ class Environment:
             if dones[i]:
                 self.states[i] = self._init_state()
             else:
-                self.states[i, config.sequence_length * N_AMINO_ACIDS :] = next_seqs[i]
+                self.states[i] = next_states[i]
         
         self.validate_states(self.states)
         
@@ -123,24 +127,25 @@ class Environment:
         idx = torch.argmax(seq, dim=1).cpu().numpy()
         return "".join([AMINO_ACIDS[i] for i in idx])
 
-    def calculate_rewards(
+    def seqs_to_states_rewards(
         self, 
         init_seqs: Float[torch.Tensor, "batch (residue amino)"],
         seqs: Float[torch.Tensor, "batch (residue amino)"]
-    ) -> Float[torch.Tensor, "batch 1"]:
+    ) -> Tuple[Float[torch.Tensor, "batch (seq residue amino)"], Float[torch.Tensor, "batch 1"]]:
         seqs_str = [self.decode_seq(seq) for seq in seqs]
+
         if config.fake_structure_prediction:
             confidences = torch.rand(config.batch_size, device=config.device)
         else:
-            pdbs = self.structure_predictor.predict_structure(seqs_str)
-            confidences = [
-                self.structure_predictor.overall_confidence_from_pdb(pdb)
-                for pdb in pdbs
-            ]
-        confidences = torch.tensor(confidences, device=config.device)
+            # Use predictor pool
+            confidences_list = self.structure_predictor_pool.predict_structure(seqs_str)
+            confidences = torch.tensor(confidences_list, device=config.device)
+
         # add penalty term for number of edits
         distance_penalty = config.distance_penalty_coeff * (init_seqs != seqs).float().mean(dim=1)
         rewards = confidences - distance_penalty
         logger.put(DistancePenalty=distance_penalty.mean().item(), Confidence=confidences.mean().item(), Reward=rewards.mean().item())
-        return rewards
 
+        next_states = torch.cat([init_seqs, seqs], dim=1)
+
+        return next_states, rewards

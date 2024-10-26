@@ -21,9 +21,10 @@ class Config:
     max_episode_length: int = 200
     device: str = "cuda"
     project_name: str = "qres_stability"
-    wandb_enabled: bool = True
+    wandb_enabled: bool = False
     fake_structure_prediction: bool = False
     distance_penalty_coeff: float = 5e-3
+    save: bool = False
 
     @property
     def state_dim(self):

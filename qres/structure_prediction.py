@@ -4,9 +4,8 @@ from transformers.models.esm.openfold_utils.feats import atom14_to_atom37
 import torch
 import io
 from Bio.PDB import PDBParser
-import numpy as np
-import os
 from typing import List
+import torch
 
 AMINO_ACIDS = list("ACDEFGHIKLMNPQRSTVWY")
 N_AMINO_ACIDS = len(AMINO_ACIDS)
@@ -15,12 +14,10 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 # Ensure that only one model is loaded in memory
 class StructurePredictor:
-    def __init__(self):
-        self.device = "cuda"
+    def __init__(self, device="cuda"):
+        self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
-        self.model = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").to(
-            self.device
-        )
+        self.model = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").to(self.device)
         self.model.esm = self.model.esm.half()
 
     def predict_structure(self, sequences: List[str]) -> List[str]:
