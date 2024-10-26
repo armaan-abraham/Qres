@@ -6,6 +6,7 @@ import yaml
 from itertools import count
 from pathlib import Path
 from collections import deque, namedtuple
+import pickle
 
 
 import uuid
@@ -122,7 +123,7 @@ def train():
         loss = []
         for i in range(NUM_AGENTS):
            loss.append(get_objective_loss(pdbs[i], objectives[i]))
-        episode_ids = torch.arange(NUM_AGENTS)  # these will be incremented
+        episode_ids = torch.arange(NUM_AGENTS, device=device)  # these will be incremented
         rewards_trajectory = [
             deque([], maxlen=REWARDS_LOOKBACK) for i in range(NUM_AGENTS)
         ]
@@ -153,7 +154,7 @@ def train():
             actions = torch.stack(
                 [
                     select_action(
-                        policy_net, states[i], objectives[i], n_steps_by_episode[i]
+                        policy_net, states[i], objectives[i], t, n_steps_by_episode[i]
                     )
                     for i in range(NUM_AGENTS)
                 ]
@@ -181,10 +182,10 @@ def train():
                     episode_ids[i],
                 )
                 memory.push(transition)
-                # write_transition_to_csv(
-                #     transition,
-                #     TRAINING_DIR / f"transitions.csv",
-                # )
+                # write transition to file
+                transition_tensor = transition_to_tensor(transition)
+                with open(TRAINING_DIR / "transitions.pkl", "ab") as file:
+                    pickle.dump(transition_tensor, file)
 
                 if (
                     len(rewards_trajectory[i]) == REWARDS_LOOKBACK
@@ -373,16 +374,28 @@ def act(state: torch.Tensor, action: torch.Tensor) -> str:
     new_sequence[residue_idx] = AMINO_ACIDS[new_amino_acid]
     return "".join(new_sequence)
 
+def transition_to_tensor(transition):
+    # Ensure all tensors have the same number of dimensions
+    state1 = transition.state1.view(-1)
+    action = transition.action.view(-1)
+    state2 = transition.state2.view(-1)
+    objective = transition.objective.view(-1)
+    reward = transition.reward.view(-1)
+    episode = transition.episode.view(-1)
+    combined_tensor = torch.cat((state1, action, state2, objective, reward, episode))
+    return combined_tensor
 
 def select_action(
     model: torch.nn.Module,
     protein_state: torch.Tensor,
     objective: torch.Tensor,
+    total_steps: int,
     n_steps_episode: int,
 ) -> torch.Tensor:
     sample = random.random()
+    # TODO: eps_threshold depends on total steps and episode steps
     eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(
-        -1.0 * n_steps_episode / EPS_DECAY
+        -1.0 * total_steps / EPS_DECAY
     )
     if sample > eps_threshold:
         # t.max(1) will return the largest column value of each row.
