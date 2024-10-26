@@ -7,7 +7,7 @@ import seaborn as sns
 import numpy as np
 from Bio.PDB import PDBParser
 
-from qres.fold import infer_structure_batch
+from qres.env import infer_structure_batch
 
 AMINO_ACIDS = list("ACDEFGHIKLMNPQRSTVWY")
 AMINO_ACID_LENGTH_ANGSTROM = 3.8
