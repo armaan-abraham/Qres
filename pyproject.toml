@@ -1,23 +1,33 @@
-[tool.poetry]
+[project]
 name = "qres"
 version = "0.1.0"
 description = ""
-authors = ["Armaan Abraham <armaan.abraham@hotmail.com>"]
+authors = [
+    { name = "Armaan Abraham", email = "armaan.abraham@hotmail.com" }
+]
 readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26.4",
+    "torch>=2.2.2",
+    "seaborn>=0.13.2",
+    "matplotlib>=3.8.4",
+    "transformers>=4.40.0",
+    "biopython>=1.83",
+    "jaxtyping>=0.2.34",
+    "wandb>=0.18.5",
+    "pytest>=8.3.3",
+]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-numpy = "^1.26.4"
-torch = "^2.2.2"
-seaborn = "^0.13.2"
-matplotlib = "^3.8.4"
-transformers = "^4.40.0"
-biopython = "^1.83"
-
-
-[tool.poetry.group.dev.dependencies]
-ipykernel = "^6.29.4"
+[tool.rye]
+managed = true
+dev-dependencies = [
+    "ipykernel>=6.29.4",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["qres"]

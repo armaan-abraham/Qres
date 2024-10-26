@@ -1,0 +1,41 @@
+{
+  "os":  "Linux-6.8.0-47-generic-x86_64-with-glibc2.39",
+  "python":  "3.12.3",
+  "startedAt":  "2024-10-26T19:39:16.288910Z",
+  "program":  "-m qres.train",
+  "git":  {
+    "remote":  "https://github.com/armaan-abraham/Q-protein.git",
+    "commit":  "f8ff9df01e58163ed32853d088d19795f33fa973"
+  },
+  "email":  "armaanabraham@g.ucla.edu",
+  "root":  "/home/armaana/Q-protein",
+  "host":  "aretha",
+  "username":  "armaana",
+  "executable":  "/home/armaana/Q-protein/.venv/bin/python",
+  "cpu_count":  24,
+  "cpu_count_logical":  48,
+  "gpu":  "NVIDIA GeForce RTX 4090",
+  "gpu_count":  1,
+  "disk":  {
+    "/":  {
+      "total":  "1000203837440",
+      "used":  "734275141632"
+    }
+  },
+  "memory":  {
+    "total":  "202437525504"
+  },
+  "cpu":  {
+    "count":  24,
+    "countLogical":  48
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "NVIDIA GeForce RTX 4090",
+      "memoryTotal":  "25757220864",
+      "cudaCores":  16384,
+      "architecture":  "Ada"
+    }
+  ],
+  "cudaVersion":  "12.2"
+}
