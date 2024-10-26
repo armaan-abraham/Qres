@@ -30,8 +30,6 @@ class DQN(nn.Module):
 
 class Agent:
     def __init__(self):
-        config.sequence_length = config.sequence_length
-
         self.policy_net = DQN().to(config.device)
         self.target_net = DQN().to(config.device)
         self.optimizer = optim.AdamW(
@@ -50,13 +48,13 @@ class Agent:
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
 
-    def validate_actions(self, actions: Bool[Tensor, "batch (residue amino_acid)"]):
+    def validate_actions(self, actions: Bool[Tensor, "batch action_dim"]):
         assert actions.shape == (
             config.batch_size,
-            config.sequence_length * N_AMINO_ACIDS,
+            config.action_dim,
         )
-        assert actions.dtype == torch.bool, f"Expected int, got {actions.dtype}"
-        assert (actions.sum(axis=1) == 1).all(), "Actions must be one-hot encoded"
+        assert actions.dtype == torch.bool, f"Expected bool, got {actions.dtype}"
+        assert (actions.sum(dim=1) == 1).all(), "Actions must be one-hot encoded"
 
     def get_epsilon(self):
         return self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(
@@ -64,15 +62,15 @@ class Agent:
         )
 
     def select_actions(
-        self, states: Float[Tensor, "batch (residue amino_acid)"]
-    ) -> Bool[Tensor, "batch (residue amino_acid)"]:
+        self, states: Float[Tensor, "batch state_dim"]
+    ) -> Bool[Tensor, "batch action_dim"]:
         eps_threshold = self.get_epsilon()
         self.steps_done += 1
         sample = torch.rand(states.shape[0], device=config.device)
 
         actions = torch.zeros(
             states.shape[0],
-            config.sequence_length * N_AMINO_ACIDS,
+            config.action_dim,
             device=config.device,
             dtype=torch.bool,
         )
@@ -83,18 +81,18 @@ class Agent:
             with torch.no_grad():
                 q_values = self.policy_net(states[greedy_mask])
                 max_indices = torch.argmax(q_values, dim=1)
-                actions[greedy_mask, max_indices] = 1
+                actions[greedy_mask, max_indices] = True
 
         # Get random actions for exploration
         random_mask = ~greedy_mask
         if random_mask.any():
             random_actions = torch.randint(
                 0,
-                config.sequence_length * N_AMINO_ACIDS,
-                (random_mask.sum(),),
+                config.action_dim,
+                (random_mask.sum().item(),),
                 device=config.device,
             )
-            actions[random_mask, random_actions] = 1
+            actions[random_mask, random_actions] = True
 
         self.validate_actions(actions)
 
@@ -122,9 +120,9 @@ class Agent:
 
     def train_step(
         self,
-        states: Float[Tensor, "batch (residue amino_acid)"],
-        actions: Bool[Tensor, "batch (residue amino_acid)"],
-        next_states: Float[Tensor, "batch (residue amino_acid)"],
+        states: Float[Tensor, "batch state_dim"],
+        actions: Bool[Tensor, "batch action_dim"],
+        next_states: Float[Tensor, "batch state_dim"],
         rewards: Float[Tensor, "batch 1"],
     ) -> float:
         """Single optimization step"""

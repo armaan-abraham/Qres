@@ -23,10 +23,12 @@ class Config:
     project_name: str = "qres_stability"
     wandb_enabled: bool = True
     fake_structure_prediction: bool = False
+    distance_penalty_coeff: float = 5e-3
 
     @property
     def state_dim(self):
-        return N_AMINO_ACIDS * self.sequence_length
+        # Updated state dimension to include initial and current sequences
+        return 2 * N_AMINO_ACIDS * self.sequence_length
 
     @property
     def action_dim(self):

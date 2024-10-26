@@ -27,7 +27,6 @@ def collect_experience(agent: Agent, env: Environment, buffer: Buffer):
 
     # Apply actions in the environment
     next_states, rewards = env.step(states, actions)  # Shapes: [batch_size, *]
-    logger.put(Reward=rewards.mean().item())
 
     # Store transitions in the buffer
     buffer.add(states, actions, next_states, rewards)
