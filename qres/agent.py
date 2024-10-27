@@ -1,13 +1,14 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
-from qres.config import config
-from jaxtyping import Float, Bool
+from jaxtyping import Bool, Float
 from torch import Tensor
+
 from qres.buffer import Buffer
-from qres.logger import logger
+from qres.config import config
 from qres.environment import validate_states
+from qres.logger import logger
 
 
 class DQN(nn.Module):
@@ -27,6 +28,7 @@ class DQN(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+
 def validate_actions(actions: Bool[Tensor, "batch action_dim"]):
     assert actions.shape == (
         config.train_batch_size,
@@ -35,11 +37,12 @@ def validate_actions(actions: Bool[Tensor, "batch action_dim"]):
     assert actions.dtype == torch.bool, f"Expected bool, got {actions.dtype}"
     assert (actions.sum(dim=1) == 1).all(), "Actions must be one-hot encoded"
 
+
 class Agent(torch.nn.Module):
     def __init__(self, device: str):
         super().__init__()
         self.device = device
-        self.steps_done = torch.zeros(1, device=device, dtype=torch.int32)
+        self.steps_done = 0
 
         self.policy_net = DQN().to(device)
         self.target_net = DQN().to(device)
@@ -58,7 +61,7 @@ class Agent(torch.nn.Module):
         self.target_net.eval()
 
     def get_epsilon(self):
-        return self.epsilon_end + (self.epsilon_start - self.epsilon_end) * torch.exp(
+        return self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(
             -1.0 * self.steps_done / self.epsilon_decay
         )
 
@@ -156,7 +159,9 @@ class Agent(torch.nn.Module):
     def train(self, buffer: Buffer):
         """Train for specified number of iterations, then update target network"""
         assert config.train_batch_size <= config.structure_predictor_batch_size
-        assert buffer.size >= config.train_batch_size, f"Buffer has only {buffer.size} samples, but {config.train_batch_size} are required"
+        assert (
+            buffer.size >= config.train_batch_size
+        ), f"Buffer has only {buffer.size} samples, but {config.train_batch_size} are required"
         total_loss = 0
         for _ in range(config.train_iter):
             states, actions, next_states, rewards = buffer.sample(
@@ -177,21 +182,26 @@ class Agent(torch.nn.Module):
         self.device = device
         self.policy_net = self.policy_net.to(device)
         self.target_net = self.target_net.to(device)
-        self.steps_done = self.steps_done.to(device)
+        for state in self.optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.to(device)
         return self
 
     def copy_(self, other):
-        self.policy_net.load_state_dict(other.policy_net.state_dict())
-        self.target_net.load_state_dict(other.target_net.state_dict())
-        self.optimizer.load_state_dict(other.optimizer.state_dict())
-        for key, value in other.optimizer.state_dict()["state"].items():
-            print(key, type(value))
-        for item in other.optimizer.state_dict()["param_groups"]:
-            print(item)
-        self.steps_done.copy_(other.steps_done)
+        policy_state = {k: v.clone() for k, v in other.policy_net.state_dict().items()}
+        target_state = {k: v.clone() for k, v in other.target_net.state_dict().items()}
+        optimizer_state = {
+            k: {
+                k2: v2.clone() if isinstance(v2, torch.Tensor) else v2
+                for k2, v2 in v.items()
+            }
+            if isinstance(v, dict)
+            else v
+            for k, v in other.optimizer.state_dict().items()
+        }
 
-    def clone(self):
-        new_agent = Agent(self.device)
-        new_agent.copy_(self)
-        logger.log(Msg="Agent cloned", StepsDone=new_agent.steps_done.item())
-        return new_agent
+        self.policy_net.load_state_dict(policy_state)
+        self.target_net.load_state_dict(target_state)
+        self.optimizer.load_state_dict(optimizer_state)
+        self.steps_done = other.steps_done

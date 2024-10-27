@@ -1,12 +1,12 @@
-from transformers import AutoTokenizer, EsmForProteinFolding
-from transformers.models.esm.openfold_utils.protein import to_pdb, Protein as OFProtein
-from transformers.models.esm.openfold_utils.feats import atom14_to_atom37
-import torch
 import io
-from Bio.PDB import PDBParser
 from typing import List
-import torch
 
+import torch
+from Bio.PDB import PDBParser
+from transformers import AutoTokenizer, EsmForProteinFolding
+from transformers.models.esm.openfold_utils.feats import atom14_to_atom37
+from transformers.models.esm.openfold_utils.protein import Protein as OFProtein
+from transformers.models.esm.openfold_utils.protein import to_pdb
 
 torch.backends.cuda.matmul.allow_tf32 = True
 
@@ -68,7 +68,7 @@ class StructurePredictor:
         try:
             # Use the parser to create a structure object from the StringIO object
             structure = parser.get_structure("PDB_structure", pdb_io)
-        except Exception as e:
+        except Exception:
             # Return zero confidence if parsing fails
             return 0.0
 

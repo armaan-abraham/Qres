@@ -1,7 +1,6 @@
 import time
-from qres.structure_prediction import StructurePredictor
-import torch
 
+from qres.structure_prediction import StructurePredictor
 
 structure_predictor = StructurePredictor()
 

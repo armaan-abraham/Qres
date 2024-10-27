@@ -32,3 +32,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["qres"]
+
+[tool.ruff.lint]
+select = [
+    "I",
+]

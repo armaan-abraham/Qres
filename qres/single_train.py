@@ -1,11 +1,13 @@
-import torch
 import random
+
 import numpy as np
-from qres.config import config
-from qres.agent import Agent
-from qres.environment import Environment
-from qres.buffer import Buffer
+import torch
 from tqdm import tqdm
+
+from qres.agent import Agent
+from qres.buffer import Buffer
+from qres.config import config
+from qres.environment import Environment
 from qres.logger import logger
 
 
@@ -42,6 +44,3 @@ class SingleTrainer:
 
             logger.put(Epoch=epoch, Epsilon=self.agent.get_epsilon())
             logger.push_attrs()
-
-    def shutdown(self):
-        pass

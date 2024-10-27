@@ -1,9 +1,11 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
+
 import yaml
 
 AMINO_ACIDS = list("ACDEFGHIKLMNPQRSTVWY")
 N_AMINO_ACIDS = len(AMINO_ACIDS)
+
 
 @dataclass
 class Config:

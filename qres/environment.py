@@ -1,16 +1,20 @@
-import torch
 import random
-from qres.structure_prediction import StructurePredictor
-from qres.config import config, AMINO_ACIDS, N_AMINO_ACIDS
-from jaxtyping import Float, Bool
 from typing import Tuple
+
+import torch
+from jaxtyping import Bool, Float
+
+from qres.config import AMINO_ACIDS, N_AMINO_ACIDS, config
 from qres.logger import logger
+from qres.structure_prediction import StructurePredictor
 
 """
 TODO:
 - step through action selection
 
 """
+
+
 def validate_states(states: Float[torch.Tensor, "batch (seq residue amino)"]):
     assert states.shape == (
         config.structure_predictor_batch_size,
@@ -26,12 +30,13 @@ def validate_states(states: Float[torch.Tensor, "batch (seq residue amino)"]):
         total_states.sum(dim=-1) == 1
     ).all(), "All residues should have exactly one amino acid selected"
 
+
 class Environment:
     def __init__(self, device: str):
         self.device = device
         logger.log_str(f"Initializing environment on device {device}")
         self.structure_predictor = StructurePredictor(device=device)
-        logger.log_str(f"Initialized structure predictor")
+        logger.log_str("Initialized structure predictor")
 
         self.states = torch.stack(
             [self._init_state() for _ in range(config.structure_predictor_batch_size)]
@@ -126,8 +131,6 @@ class Environment:
             config.structure_predictor_batch_size,
             config.sequence_length * N_AMINO_ACIDS,
         )
-
-
 
     def decode_seq(self, seq: Float[torch.Tensor, "(residue amino)"]) -> str:
         seq = seq.view(config.sequence_length, N_AMINO_ACIDS)

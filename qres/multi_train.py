@@ -1,15 +1,15 @@
-import torch.multiprocessing as mp
-from typing import List
-from tqdm import tqdm
-from qres.config import config
-from enum import Enum
-from qres.agent import Agent
-from qres.environment import Environment
-from qres.buffer import Buffer
-from qres.logger import logger
-import torch
-from threading import Lock
 from copy import deepcopy
+from enum import Enum
+
+import torch
+import torch.multiprocessing as mp
+from tqdm import tqdm
+
+from qres.agent import Agent
+from qres.buffer import Buffer
+from qres.config import config
+from qres.environment import Environment
+from qres.logger import logger
 
 """
 TODO: add logging
@@ -51,6 +51,7 @@ class TaskType(Enum):
     TRAIN_AGENT = 1
     ERROR = 2
 
+
 def worker(
     tasks: mp.Queue,
     results: mp.Queue,
@@ -62,7 +63,7 @@ def worker(
     Handles both structure prediction and training
     """
     try:
-        device = f"cuda"
+        device = "cuda"
         env = Environment(device=device)
         logger_kwargs = {"Worker": device_id}
     except Exception as e:
@@ -71,17 +72,18 @@ def worker(
 
     try:
         while True:
-            task, agent = tasks.get()
+            task = tasks.get()
 
             if task is None:
                 break
 
+            task_type, agent = task
+
             logger_kwargs_local = deepcopy(logger_kwargs)
-            if task == TaskType.PREDICT_STRUCTURE:
+            if task_type == TaskType.PREDICT_STRUCTURE:
                 logger_kwargs_local["Task"] = "predict_structure"
                 logger_kwargs_local["Msg"] = "started"
                 logger.log(**logger_kwargs_local)
-
 
                 states = env.get_states()
                 logger_kwargs_local["Msg"] = "got states"
@@ -112,10 +114,18 @@ def worker(
                 logger_kwargs_local["Msg"] = "added experiences to buffer"
                 logger.log(**logger_kwargs_local)
 
-                results.put((TaskType.PREDICT_STRUCTURE, None))
-                del agent, buffer_local, states, actions, next_states, rewards, logger_kwargs_local
+                results.put((TaskType.PREDICT_STRUCTURE, {}))
+                del (
+                    agent,
+                    buffer_local,
+                    states,
+                    actions,
+                    next_states,
+                    rewards,
+                    logger_kwargs_local,
+                )
 
-            elif task == TaskType.TRAIN_AGENT:
+            elif task_type == TaskType.TRAIN_AGENT:
                 logger_kwargs_local["Task"] = "train_agent"
                 logger_kwargs_local["Msg"] = "started"
                 logger.log(**logger_kwargs_local)
@@ -138,13 +148,10 @@ def worker(
                 logger_kwargs_local["Msg"] = "trained agent"
                 logger.log(**logger_kwargs_local)
 
-                logger_kwargs_local["Msg"] = "updated global agent"
-                logger.log(**logger_kwargs_local)
-
-                results.put((TaskType.TRAIN_AGENT, agent.cpu()))
+                results.put((TaskType.TRAIN_AGENT, {"agent": agent.to("cpu")}))
                 del agent, buffer_local, logger_kwargs_local
             else:
-                raise ValueError(f"Unknown task type: {task}")
+                raise ValueError(f"Unknown task type: {task_type}")
             torch.cuda.empty_cache()
             logger.push_attrs()
     except Exception as e:
@@ -153,6 +160,7 @@ def worker(
         logger.log(**logger_kwargs_local)
         results.put((TaskType.ERROR, {"error": e}))
         raise
+
 
 class MultiTrainer:
     def __init__(self):
@@ -170,70 +178,74 @@ class MultiTrainer:
         buffer.share_memory()
         buffer_lock = mp.Lock()
 
-        workers = []
-        for i in range(self.num_workers):
-            logger.log_str(f"Starting worker {i}")
-            p = mp.Process(
-                target=worker,
-                args=(
-                    tasks,
-                    results,
-                    buffer,
-                    buffer_lock,
-                    self.device_ids[i],
-                ),
-            )
-            p.start()
-            workers.append(p)
-
-        tasks_since_last_train = 0
-        # We only want one training task to be in progress at a time
-        prev_train_completed = True
-        n_epochs = 0
-        n_active_workers = 0
-        with tqdm(total=config.n_epochs) as pbar:
-            while n_epochs < config.n_epochs:
-                assert n_active_workers <= self.num_workers and n_active_workers >= 0
-                assert (
-                    tasks_since_last_train >= 0
-                    and tasks_since_last_train <= config.train_interval
+        try:
+            workers = []
+            for i in range(self.num_workers):
+                logger.log_str(f"Starting worker {i}")
+                p = mp.Process(
+                    target=worker,
+                    args=(
+                        tasks,
+                        results,
+                        buffer,
+                        buffer_lock,
+                        self.device_ids[i],
+                    ),
                 )
+                p.start()
+                workers.append(p)
 
-                # Choose task type and add to task queue
-                if (
-                    tasks_since_last_train >= config.train_interval
-                    and prev_train_completed
-                ):
-                    logger.log_str("Adding train agent task to queue")
-                    self.tasks.put((TaskType.TRAIN_AGENT, agent))
-                    prev_train_completed = False
-                    tasks_since_last_train = 0
-                    pbar.update(1)
-                    logger.log(Epoch=n_epochs)
-                else:
-                    logger.log_str("Adding predict structure task to queue")
-                    self.tasks.put((TaskType.PREDICT_STRUCTURE, agent))
-                    tasks_since_last_train += 1
-                n_active_workers += 1
+            tasks_since_last_train = 0
+            # We only want one training task to be in progress at a time
+            prev_train_completed = True
+            n_epochs = 0
+            n_active_workers = 0
+            with tqdm(total=config.n_epochs) as pbar:
+                while n_epochs < config.n_epochs:
+                    assert (
+                        n_active_workers <= self.num_workers and n_active_workers >= 0
+                    )
+                    assert (
+                        tasks_since_last_train >= 0
+                        and tasks_since_last_train <= config.train_interval
+                    )
 
-                if n_active_workers == self.num_workers:
-                    # Take result from queue
-                    logger.log_str(f"Waiting for result from queue")
-                    task_type, result = self.results.get()
-                    if task_type == TaskType.ERROR:
-                        raise result["error"]
-                    elif task_type == TaskType.TRAIN_AGENT:
-                        assert result["agent"].device == "cpu"
-                        agent = result["agent"]
-                        n_epochs += 1
-                        prev_train_completed = True
-                        logger.log_str(f"Train agent task completed")
-                    elif task_type == TaskType.PREDICT_STRUCTURE:
-                        logger.log_str(f"Predict structure task completed")
-                    n_active_workers -= 1
+                    # Choose task type and add to task queue
+                    if (
+                        tasks_since_last_train >= config.train_interval
+                        and prev_train_completed
+                    ):
+                        logger.log_str("Adding train agent task to queue")
+                        tasks.put((TaskType.TRAIN_AGENT, agent))
+                        prev_train_completed = False
+                        tasks_since_last_train = 0
+                        pbar.update(1)
+                        logger.log(Epoch=n_epochs)
+                    else:
+                        logger.log_str("Adding predict structure task to queue")
+                        tasks.put((TaskType.PREDICT_STRUCTURE, agent))
+                        tasks_since_last_train += 1
+                    n_active_workers += 1
 
-    def shutdown(self):
-        for _ in self.workers:
-            self.tasks.put(None)
-        for p in self.workers:
-            p.join()
+                    if n_active_workers == self.num_workers:
+                        # Take result from queue
+                        logger.log_str("Waiting for result from queue")
+                        task_type, result = results.get()
+                        if task_type == TaskType.ERROR:
+                            raise result["error"]
+                        elif task_type == TaskType.TRAIN_AGENT:
+                            assert result["agent"].device == "cpu", result[
+                                "agent"
+                            ].device
+                            agent.copy_(result["agent"])
+                            n_epochs += 1
+                            prev_train_completed = True
+                            logger.log_str("Train agent task completed")
+                        elif task_type == TaskType.PREDICT_STRUCTURE:
+                            logger.log_str("Predict structure task completed")
+                        n_active_workers -= 1
+        finally:
+            for _ in workers:
+                tasks.put(None)
+            for p in workers:
+                p.join()

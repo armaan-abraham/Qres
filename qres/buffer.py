@@ -1,8 +1,11 @@
-import torch
-from qres.config import config
-from torch import Tensor
-from jaxtyping import Float, Bool
 from typing import Dict
+
+import torch
+from jaxtyping import Bool, Float
+from torch import Tensor
+
+from qres.config import config
+
 
 class Buffer:
     def __init__(self, device: str):
@@ -22,7 +25,6 @@ class Buffer:
             (config.max_buffer_size, config.state_dim), device=self.device
         )
         self.rewards = torch.zeros((config.max_buffer_size, 1), device=self.device)
-
 
     def add_single(self, state, action, next_state, reward):
         self.states[self.pos] = state
@@ -85,7 +87,7 @@ class Buffer:
         for attr in self.__dict__:
             if isinstance(getattr(self, attr), torch.Tensor):
                 getattr(self, attr).share_memory_()
-    
+
     def copy_(self, other):
         for attr in self.__dict__:
             if isinstance(getattr(self, attr), torch.Tensor):
@@ -104,4 +106,3 @@ class Buffer:
             if isinstance(getattr(self, attr), torch.Tensor):
                 results[attr] = getattr(self, attr).device
         return results
-

@@ -1,8 +1,10 @@
+from pprint import pprint
+from threading import get_ident
+
+import torch.multiprocessing as mp
+
 import wandb
 from qres.config import config
-from pprint import pprint
-import torch.multiprocessing as mp
-from threading import get_ident
 
 
 class Logger:
@@ -36,7 +38,7 @@ class Logger:
             self.wandb.log(kwargs)
         else:
             pprint(kwargs)
-    
+
     def log_str(self, s: str):
         if config.wandb_enabled:
             self.wandb.log({"log": s})
