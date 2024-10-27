@@ -66,10 +66,11 @@ class Agent(torch.nn.Module):
         )
 
     def select_actions(
-        self, states: Float[Tensor, "batch state_dim"]
+        self, states: Bool[Tensor, "batch state_dim"]
     ) -> Bool[Tensor, "batch action_dim"]:
+        if states.dtype != torch.float:
+            states = states.to(dtype=torch.float)
         eps_threshold = self.get_epsilon()
-        self.steps_done += 1
         sample = torch.rand(states.shape[0], device=self.device)
 
         actions = torch.zeros(
@@ -124,9 +125,9 @@ class Agent(torch.nn.Module):
 
     def train_step(
         self,
-        states: Float[Tensor, "batch state_dim"],
+        states: Bool[Tensor, "batch state_dim"],
         actions: Bool[Tensor, "batch action_dim"],
-        next_states: Float[Tensor, "batch state_dim"],
+        next_states: Bool[Tensor, "batch state_dim"],
         rewards: Float[Tensor, "batch 1"],
     ) -> float:
         """Single optimization step"""
@@ -154,11 +155,12 @@ class Agent(torch.nn.Module):
         nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
         self.optimizer.step()
 
+        self.steps_done += 1
+
         return loss.item()
 
     def train(self, buffer: Buffer):
         """Train for specified number of iterations, then update target network"""
-        assert config.train_batch_size <= config.structure_predictor_batch_size
         assert (
             buffer.size >= config.train_batch_size
         ), f"Buffer has only {buffer.size} samples, but {config.train_batch_size} are required"
@@ -178,6 +180,10 @@ class Agent(torch.nn.Module):
             validate_actions(actions)
             validate_states(states)
             validate_states(next_states)
+
+            states = states.to(dtype=torch.float)
+            next_states = next_states.to(dtype=torch.float)
+
             loss = self.train_step(states, actions, next_states, rewards)
             total_loss += loss
 
@@ -187,14 +193,20 @@ class Agent(torch.nn.Module):
         logger.put(Loss=avg_loss)
 
     def to(self, device: str):
-        self.device = device
-        self.policy_net = self.policy_net.to(device)
-        self.target_net = self.target_net.to(device)
-        for state in self.optimizer.state.values():
+        inst = self.clone()
+        inst.device = device
+        inst.policy_net = inst.policy_net.to(device)
+        inst.target_net = inst.target_net.to(device)
+        for state in inst.optimizer.state.values():
             for k, v in state.items():
                 if isinstance(v, torch.Tensor):
                     state[k] = v.to(device)
-        return self
+        return inst
+
+    def clone(self):
+        clone = Agent(self.device)
+        clone.copy_(self)
+        return clone
 
     def copy_(self, other):
         policy_state = {k: v.clone() for k, v in other.policy_net.state_dict().items()}
@@ -208,7 +220,6 @@ class Agent(torch.nn.Module):
             else v
             for k, v in other.optimizer.state_dict().items()
         }
-
         self.policy_net.load_state_dict(policy_state)
         self.target_net.load_state_dict(target_state)
         self.optimizer.load_state_dict(optimizer_state)

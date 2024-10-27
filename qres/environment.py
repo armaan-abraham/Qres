@@ -15,21 +15,13 @@ TODO:
 """
 
 
-def validate_states(states: Float[torch.Tensor, "batch (seq residue amino)"]):
-    assert states.shape == (
-        config.structure_predictor_batch_size,
-        config.state_dim,
-    )
-    total_states = states.view(
-        config.structure_predictor_batch_size,
-        2,
-        config.sequence_length,
-        N_AMINO_ACIDS,
-    )
+def validate_states(states: torch.Tensor):
+    assert states.shape[1] == config.state_dim, f"States have incorrect shape {states.shape[1]} != {config.state_dim}"
+    assert states.dtype == config.state_dtype, f"States have incorrect data type {states.dtype} != {config.state_dtype}"
+    # Ensure all amino acid indices are valid
     assert (
-        total_states.sum(dim=-1) == 1
-    ).all(), "All residues should have exactly one amino acid selected"
-
+        (states >= 0) & (states < N_AMINO_ACIDS)
+    ).all(), "Invalid amino acid indices in states"
 
 class Environment:
     def __init__(self, device: str):
@@ -47,44 +39,42 @@ class Environment:
             config.structure_predictor_batch_size, device=self.device
         )
 
-    def _init_state(self) -> Float[torch.Tensor, "(seq residue amino)"]:
-        sequence = torch.zeros(
-            (config.sequence_length, N_AMINO_ACIDS), device=self.device
+    def _init_state(self) -> torch.Tensor:
+        # Generate a random initial sequence of amino acid indices
+        sequence = torch.randint(
+            low=0,
+            high=N_AMINO_ACIDS,
+            size=(config.sequence_length,),
+            dtype=config.state_dtype,
+            device=self.device,
         )
-        for i in range(config.sequence_length):
-            sequence[i, random.randint(0, N_AMINO_ACIDS - 1)] = 1
-
-        # The initial sequence is the same as the current sequence at the start
-        initial_sequence = sequence.reshape(-1)
-        current_sequence = sequence.clone().reshape(-1)
+        # At the start, the initial and current sequences are the same
+        initial_sequence = sequence.clone()
+        current_sequence = sequence.clone()
 
         # Concatenate the initial and current sequences to form the state
-        state = torch.cat([initial_sequence, current_sequence], dim=0)
+        state = torch.cat([initial_sequence, current_sequence], dim=0)  # Shape: (2 * sequence_length,)
         return state
 
-    def get_states(self) -> Float[torch.Tensor, "batch (seq residue amino)"]:
+    def get_states(self) -> Bool[torch.Tensor, "batch (seq residue amino)"]:
         return self.states.clone()
 
     def parse_seqs_from_states(
-        self, state: Float[torch.Tensor, "batch (seq residue amino)"]
-    ) -> Tuple[
-        Float[torch.Tensor, "batch (residue amino)"],
-        Float[torch.Tensor, "batch (residue amino)"],
-    ]:
+        self, states: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         # Split the state into initial and current sequences
-        split_dim = config.sequence_length * N_AMINO_ACIDS
-        init_seqs = state[:, :split_dim]
-        seqs = state[:, split_dim:]
+        split_dim = config.sequence_length
+        init_seqs = states[:, :split_dim]    # Shape: (batch_size, sequence_length)
+        seqs = states[:, split_dim:]         # Shape: (batch_size, sequence_length)
         return init_seqs, seqs
 
     def step(
         self,
-        states: Float[torch.Tensor, "batch (seq residue amino)"],
+        states: torch.Tensor,
         actions: Bool[torch.Tensor, "batch (residue amino)"],
     ) -> Tuple[
-        Float[torch.Tensor, "batch (seq residue amino)"],
+        torch.Tensor,
         Float[torch.Tensor, "batch 1"],
-        Bool[torch.Tensor, "batch 1"],
     ]:
         init_seqs, seqs = self.parse_seqs_from_states(states)
 
@@ -109,12 +99,9 @@ class Environment:
 
     def apply_actions(
         self,
-        seqs: Float[torch.Tensor, "batch (residue amino_acid)"],
+        seqs: torch.Tensor,
         actions: Bool[torch.Tensor, "batch (residue amino_acid)"],
-    ) -> Float[torch.Tensor, "batch (residue amino_acid)"]:
-        seqs = seqs.view(
-            config.structure_predictor_batch_size, config.sequence_length, N_AMINO_ACIDS
-        )
+    ) -> torch.Tensor:
         actions = actions.view(
             config.structure_predictor_batch_size, config.sequence_length, N_AMINO_ACIDS
         )
@@ -122,27 +109,20 @@ class Environment:
 
         # Find the residue where the action is 1 and replace the corresponding
         # residue in the sequence
-        batch_indices, residue_indices, _ = torch.where(actions == 1)
-        next_seqs[batch_indices, residue_indices] = actions[
-            batch_indices, residue_indices
-        ].to(dtype=next_seqs.dtype)
+        batch_indices, residue_indices, amino_indices = torch.where(actions == 1)
+        next_seqs[batch_indices, residue_indices] = amino_indices.to(dtype=config.state_dtype)
 
-        return next_seqs.view(
-            config.structure_predictor_batch_size,
-            config.sequence_length * N_AMINO_ACIDS,
-        )
+        return next_seqs
 
-    def decode_seq(self, seq: Float[torch.Tensor, "(residue amino)"]) -> str:
-        seq = seq.view(config.sequence_length, N_AMINO_ACIDS)
-        idx = torch.argmax(seq, dim=1).cpu().numpy()
-        return "".join([AMINO_ACIDS[i] for i in idx])
+    def decode_seq(self, seq: torch.Tensor) -> str:
+        return "".join([AMINO_ACIDS[i] for i in seq.cpu().numpy()])
 
     def seqs_to_states_rewards(
         self,
-        init_seqs: Float[torch.Tensor, "batch (residue amino)"],
-        seqs: Float[torch.Tensor, "batch (residue amino)"],
+        init_seqs: torch.Tensor,
+        seqs: torch.Tensor,
     ) -> Tuple[
-        Float[torch.Tensor, "batch (seq residue amino)"], Float[torch.Tensor, "batch 1"]
+        torch.Tensor, Float[torch.Tensor, "batch 1"]
     ]:
         seqs_str = [self.decode_seq(seq) for seq in seqs]
 

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+import torch
 
 import yaml
 
@@ -11,13 +12,13 @@ N_AMINO_ACIDS = len(AMINO_ACIDS)
 class Config:
     sequence_length: int = 30
 
-    structure_predictor_batch_size: int = int(1e3)
+    structure_predictor_batch_size: int = int(500)
 
     max_buffer_size: int = int(1e7)
     n_epochs: int = int(5e3)
 
-    train_iter: int = int(1e2)
-    train_batch_size: int = int(1e4)
+    train_iter: int = int(100)
+    train_batch_size: int = int(1500)
 
     @property
     def train_interval(self):
@@ -43,10 +44,12 @@ class Config:
 
     train_type: str = "multi-gpu"
 
+    state_dtype: torch.dtype = torch.int8  # Updated state data type
+
     @property
     def state_dim(self):
-        # Updated state dimension to include initial and current sequences
-        return 2 * N_AMINO_ACIDS * self.sequence_length
+        # Updated state dimension to account for indices instead of one-hot encoding
+        return 2 * self.sequence_length
 
     @property
     def action_dim(self):

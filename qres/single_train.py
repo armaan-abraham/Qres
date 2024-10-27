@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from pathlib import Path
 from qres.agent import Agent
 from qres.buffer import Buffer
 from qres.config import config
@@ -12,7 +13,7 @@ from qres.logger import logger
 
 
 class SingleTrainer:
-    def __init__(self):
+    def __init__(self, save_dir: Path = None):
         random.seed(0)
         np.random.seed(0)
         torch.manual_seed(0)

@@ -17,7 +17,6 @@ def get_curr_save_dir():
 
 
 if __name__ == "__main__":
-    curr_save_dir = get_curr_save_dir()
     if config.wandb_enabled:
         wandb.init(
             project=config.project_name,
@@ -26,11 +25,21 @@ if __name__ == "__main__":
         )
     try:
         if config.train_type == "multi-gpu":
-            trainer = MultiTrainer(curr_save_dir)
+            trainer = MultiTrainer
         elif config.train_type == "single-gpu":
-            trainer = SingleTrainer()
+            trainer = SingleTrainer
         else:
             raise ValueError(f"Invalid train type: {config.train_type}")
+
+        if config.save_enabled:
+            curr_save_dir = get_curr_save_dir()
+            if not curr_save_dir.exists():
+                curr_save_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            curr_save_dir = None
+
+        trainer = trainer(curr_save_dir)
+
         trainer.run()
     finally:
         if config.save_enabled:
@@ -40,6 +49,5 @@ if __name__ == "__main__":
             trainer.agent.save_model(curr_save_dir / "model.pt")
             trainer.buffer.save(curr_save_dir / "buffer.pth")
             config.save(curr_save_dir / "config.yaml")
-        logger.finish()
         if config.wandb_enabled:
             wandb.finish()
