@@ -163,6 +163,14 @@ class Agent(torch.nn.Module):
             buffer.size >= config.train_batch_size
         ), f"Buffer has only {buffer.size} samples, but {config.train_batch_size} are required"
         total_loss = 0
+        logger.log(
+            Msg="Training",
+            StepsDone=self.steps_done,
+            OptimizerStateMeans={
+                k: v.mean().item()
+                for k, v in self.optimizer.state_dict()["state"].get(0, {}).items()
+            },
+        )
         for _ in range(config.train_iter):
             states, actions, next_states, rewards = buffer.sample(
                 config.train_batch_size

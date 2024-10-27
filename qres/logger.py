@@ -1,8 +1,6 @@
 from pprint import pprint
 from threading import get_ident
 
-import torch.multiprocessing as mp
-
 import wandb
 from qres.config import config
 
@@ -19,18 +17,15 @@ class Logger:
                 config=config.__dict__,
             )
         self.attrs = {}
-        self._lock = mp.Lock()
 
     def put(self, **kwargs):
         thread_id = get_ident()
-        # with self._lock:
         self.attrs[thread_id] = self.attrs.get(thread_id, {})
         self.attrs[thread_id].update(kwargs)
 
     def push_attrs(self):
         thread_id = get_ident()
         self.log(**self.attrs[thread_id])
-        # with self._lock:
         self.attrs[thread_id] = {}
 
     def log(self, **kwargs):
