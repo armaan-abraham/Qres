@@ -10,6 +10,8 @@ from qres.buffer import Buffer
 from qres.config import config
 from qres.environment import Environment
 from qres.logger import logger
+from pathlib import Path
+import wandb
 
 """
 TODO: add logging
@@ -58,11 +60,21 @@ def worker(
     buffer: Buffer,
     buffer_lock,
     device_id: int,
+    wandb_run_id: str = None,  # Add wandb run ID parameter
 ):
     """
     Handles both structure prediction and training
     """
     try:
+        # Initialize wandb in worker process if enabled
+        if config.wandb_enabled:
+            wandb.init(
+                project=config.project_name,
+                id=wandb_run_id,  # Use the same run ID
+                resume="allow",
+                name=config.run_name,
+            )
+
         device = "cuda"
         env = Environment(device=device)
         logger_kwargs = {"Worker": device_id}
@@ -163,9 +175,11 @@ def worker(
 
 
 class MultiTrainer:
-    def __init__(self):
+    def __init__(self, save_dir: Path):
+        self.save_dir = save_dir
         self.device_ids = list(range(torch.cuda.device_count()))
         self.num_workers = len(self.device_ids)
+        self.wandb_run_id = wandb.run.id if config.wandb_enabled else None  # Store wandb run ID
 
     def run(self):
         mp.set_start_method("spawn", force=True)
@@ -190,6 +204,7 @@ class MultiTrainer:
                         buffer,
                         buffer_lock,
                         self.device_ids[i],
+                        self.wandb_run_id,  # Pass wandb run ID to workers
                     ),
                 )
                 p.start()
@@ -241,11 +256,27 @@ class MultiTrainer:
                             n_epochs += 1
                             prev_train_completed = True
                             logger.log_str("Train agent task completed")
+
+                            if True:
+                                self.save(agent, buffer, n_epochs)
+
                         elif task_type == TaskType.PREDICT_STRUCTURE:
                             logger.log_str("Predict structure task completed")
+                            logger.log(BufferSize=buffer.size)
                         n_active_workers -= 1
+
         finally:
             for _ in workers:
                 tasks.put(None)
             for p in workers:
                 p.join()
+
+
+    def save(self, agent: Agent, buffer: Buffer, n_epochs: int):
+        agent.save_model(self.save_dir / f"model_{n_epochs}.pt")
+        buffer.save(self.save_dir / f"buffer_{n_epochs}.pth")
+        config.save(self.save_dir / f"config_{n_epochs}.yaml")
+
+        wandb.save(self.save_dir / f"model_{n_epochs}.pt")
+        wandb.save(self.save_dir / f"buffer_{n_epochs}.pth")
+        wandb.save(self.save_dir / f"config_{n_epochs}.yaml")

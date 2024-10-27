@@ -11,13 +11,13 @@ N_AMINO_ACIDS = len(AMINO_ACIDS)
 class Config:
     sequence_length: int = 30
 
-    structure_predictor_batch_size: int = 32
+    structure_predictor_batch_size: int = int(1e3)
 
-    max_buffer_size: int = int(1e6)
-    n_epochs: int = int(1e4)  # TODO
+    max_buffer_size: int = int(1e7)
+    n_epochs: int = int(5e3)
 
-    train_iter: int = int(5e1)
-    train_batch_size: int = 32
+    train_iter: int = int(1e2)
+    train_batch_size: int = int(1e4)
 
     @property
     def train_interval(self):
@@ -36,9 +36,10 @@ class Config:
     max_episode_length: int = 200
 
     project_name: str = "qres_stability"
-    wandb_enabled: bool = False
+    run_name: str = "4H"
+    wandb_enabled: bool = True
     fake_structure_prediction: bool = False
-    save_enabled: bool = False
+    save_enabled: bool = True
 
     train_type: str = "multi-gpu"
 

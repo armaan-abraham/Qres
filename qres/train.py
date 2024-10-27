@@ -4,6 +4,7 @@ from qres.config import config
 from qres.logger import logger
 from qres.multi_train import MultiTrainer
 from qres.single_train import SingleTrainer
+import wandb
 
 save_dir = Path(__file__).parent / "data"
 save_dir.mkdir(parents=True, exist_ok=True)
@@ -16,9 +17,16 @@ def get_curr_save_dir():
 
 
 if __name__ == "__main__":
+    curr_save_dir = get_curr_save_dir()
+    if config.wandb_enabled:
+        wandb.init(
+            project=config.project_name,
+            config=config.__dict__,
+            name=config.run_name,
+        )
     try:
         if config.train_type == "multi-gpu":
-            trainer = MultiTrainer()
+            trainer = MultiTrainer(curr_save_dir)
         elif config.train_type == "single-gpu":
             trainer = SingleTrainer()
         else:
@@ -26,7 +34,6 @@ if __name__ == "__main__":
         trainer.run()
     finally:
         if config.save_enabled:
-            curr_save_dir = get_curr_save_dir()
             print(f"Saving to {curr_save_dir}")
             if not curr_save_dir.exists():
                 curr_save_dir.mkdir(parents=True, exist_ok=True)
@@ -34,3 +41,5 @@ if __name__ == "__main__":
             trainer.buffer.save(curr_save_dir / "buffer.pth")
             config.save(curr_save_dir / "config.yaml")
         logger.finish()
+        if config.wandb_enabled:
+            wandb.finish()

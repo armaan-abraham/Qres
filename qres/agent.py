@@ -15,25 +15,25 @@ class DQN(nn.Module):
     def __init__(self):
         super().__init__()
 
-        hidden_size = 256
+        self.hidden_size = 256
+        self.n_hidden = 5
 
-        self.model = nn.Sequential(
-            nn.Linear(config.state_dim, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, config.action_dim),
-        )
+        layers = [nn.Linear(config.state_dim, self.hidden_size), nn.ReLU()]
+        for _ in range(self.n_hidden - 1):
+            layers.extend([
+                nn.Linear(self.hidden_size, self.hidden_size),
+                nn.ReLU()
+            ])
+        layers.append(nn.Linear(self.hidden_size, config.action_dim))
+
+        self.model = nn.Sequential(*layers)
 
     def forward(self, x):
         return self.model(x)
 
 
 def validate_actions(actions: Bool[Tensor, "batch action_dim"]):
-    assert actions.shape == (
-        config.train_batch_size,
-        config.action_dim,
-    )
+    assert actions.shape[1] == config.action_dim, f"Expected actions.shape[1] == {config.action_dim}, got {actions.shape[1]}"
     assert actions.dtype == torch.bool, f"Expected bool, got {actions.dtype}"
     assert (actions.sum(dim=1) == 1).all(), "Actions must be one-hot encoded"
 

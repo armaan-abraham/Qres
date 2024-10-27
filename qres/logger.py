@@ -11,11 +11,6 @@ class Logger:
     """
 
     def __init__(self):
-        if config.wandb_enabled:
-            self.wandb = wandb.init(
-                project=config.project_name,
-                config=config.__dict__,
-            )
         self.attrs = {}
 
     def put(self, **kwargs):
@@ -30,19 +25,15 @@ class Logger:
 
     def log(self, **kwargs):
         if config.wandb_enabled:
-            self.wandb.log(kwargs)
+            wandb.log(kwargs)
         else:
             pprint(kwargs)
 
     def log_str(self, s: str):
         if config.wandb_enabled:
-            self.wandb.log({"log": s})
+            wandb.log({"log": s})
         else:
             print(s)
-
-    def finish(self):
-        if config.wandb_enabled:
-            self.wandb.finish()
 
 
 logger = Logger()
