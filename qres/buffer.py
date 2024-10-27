@@ -4,22 +4,23 @@ from qres.config import config
 
 
 class Buffer:
-    def __init__(self):
+    def __init__(self, device: str):
+        self.device = device
         self.pos = 0
         self.size = 0
 
         self.states = torch.zeros(
-            (config.max_buffer_size, config.state_dim), device=config.device
+            (config.max_buffer_size, config.state_dim), device=self.device
         )
         self.actions = torch.zeros(
             (config.max_buffer_size, config.action_dim),
             dtype=torch.bool,
-            device=config.device,
+            device=self.device,
         )
         self.next_states = torch.zeros(
-            (config.max_buffer_size, config.state_dim), device=config.device
+            (config.max_buffer_size, config.state_dim), device=self.device
         )
-        self.rewards = torch.zeros((config.max_buffer_size, 1), device=config.device)
+        self.rewards = torch.zeros((config.max_buffer_size, 1), device=self.device)
 
     def add_single(self, state, action, next_state, reward):
         self.states[self.pos] = state
@@ -40,7 +41,7 @@ class Buffer:
         max_pos = (
             config.max_buffer_size if self.size == config.max_buffer_size else self.pos
         )
-        indices = torch.randint(0, max_pos, (batch_size,), device=config.device)
+        indices = torch.randint(0, max_pos, (batch_size,), device=self.device)
 
         return (
             self.states[indices],
@@ -61,3 +62,21 @@ class Buffer:
             },
             path,
         )
+
+    def to(self, device):
+        self.device = device
+        self.states = self.states.to(device)
+        self.actions = self.actions.to(device)
+        self.next_states = self.next_states.to(device)
+        self.rewards = self.rewards.to(device)
+        return self
+
+    def clone(self):
+        new_buffer = Buffer(self.device, self.convert_new_to_device)
+        new_buffer.pos = self.pos
+        new_buffer.size = self.size
+        new_buffer.states = self.states.clone()
+        new_buffer.actions = self.actions.clone()
+        new_buffer.next_states = self.next_states.clone()
+        new_buffer.rewards = self.rewards.clone()
+        return new_buffer

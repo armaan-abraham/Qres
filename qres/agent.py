@@ -29,9 +29,10 @@ class DQN(nn.Module):
 
 
 class Agent:
-    def __init__(self):
-        self.policy_net = DQN().to(config.device)
-        self.target_net = DQN().to(config.device)
+    def __init__(self, device: str):
+        self.device = device
+        self.policy_net = DQN().to(device)
+        self.target_net = DQN().to(device)
         self.optimizer = optim.AdamW(
             self.policy_net.parameters(), lr=config.lr, amsgrad=True
         )
@@ -42,7 +43,6 @@ class Agent:
         self.epsilon_decay = config.epsilon_decay
         self.gamma = config.gamma
         self.tau = config.tau
-        self.batch_size = config.batch_size
 
         # Initialize target network weights
         self.target_net.load_state_dict(self.policy_net.state_dict())
@@ -50,7 +50,7 @@ class Agent:
 
     def validate_actions(self, actions: Bool[Tensor, "batch action_dim"]):
         assert actions.shape == (
-            config.batch_size,
+            config.train_batch_size,
             config.action_dim,
         )
         assert actions.dtype == torch.bool, f"Expected bool, got {actions.dtype}"
@@ -66,12 +66,12 @@ class Agent:
     ) -> Bool[Tensor, "batch action_dim"]:
         eps_threshold = self.get_epsilon()
         self.steps_done += 1
-        sample = torch.rand(states.shape[0], device=config.device)
+        sample = torch.rand(states.shape[0], device=self.device)
 
         actions = torch.zeros(
             states.shape[0],
             config.action_dim,
-            device=config.device,
+            device=self.device,
             dtype=torch.bool,
         )
         greedy_mask = sample > eps_threshold
@@ -90,7 +90,7 @@ class Agent:
                 0,
                 config.action_dim,
                 (random_mask.sum().item(),),
-                device=config.device,
+                device=self.device,
             )
             actions[random_mask, random_actions] = True
 
@@ -128,15 +128,17 @@ class Agent:
         """Single optimization step"""
         # Compute Q(s_t, a)
         state_action_values = self.policy_net(states)[actions]
-        assert state_action_values.shape == (config.batch_size,)
+        assert state_action_values.shape == (config.train_batch_size,)
 
         # Compute V(s_{t+1}) for all next states
         with torch.no_grad():
             next_state_values = self.target_net(next_states).max(1)[0]
-        assert next_state_values.shape == (config.batch_size,)
+        assert next_state_values.shape == (config.train_batch_size,)
 
         # Compute expected Q values
-        expected_state_action_values = (next_state_values * self.gamma) + rewards.squeeze(1)
+        expected_state_action_values = (
+            next_state_values * self.gamma
+        ) + rewards.squeeze(1)
 
         # Compute loss
         criterion = nn.SmoothL1Loss()
@@ -152,14 +154,34 @@ class Agent:
 
     def train(self, buffer: Buffer):
         """Train for specified number of iterations, then update target network"""
-        assert buffer.size >= config.batch_size
+        assert buffer.size >= config.train_batch_size
+        assert config.train_batch_size <= config.structure_predictor_batch_size
         total_loss = 0
-        for _ in range(config.train_iterations_per_batch):
-            states, actions, next_states, rewards = buffer.sample(config.batch_size)
+        for _ in range(config.train_iter):
+            states, actions, next_states, rewards = buffer.sample(config.train_batch_size)
             loss = self.train_step(states, actions, next_states, rewards)
             total_loss += loss
 
         # Update target network after all iterations
         self.update_target_net()
-        avg_loss = total_loss / config.train_iterations_per_batch
+        avg_loss = total_loss / config.train_iter
         logger.put(Loss=avg_loss)
+
+    def to(self, device: str):
+        self.device = device
+        self.policy_net = self.policy_net.to(device)
+        self.target_net = self.target_net.to(device)
+        return self
+
+    def clone(self):
+        new_agent = Agent(self.device)
+        new_agent.policy_net.load_state_dict(self.policy_net.state_dict())
+        new_agent.target_net.load_state_dict(self.target_net.state_dict())
+        new_agent.optimizer = optim.AdamW(
+            new_agent.policy_net.parameters(), 
+            lr=config.lr,
+            amsgrad=True
+        )
+        new_agent.steps_done = self.steps_done
+        return new_agent
+

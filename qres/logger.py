@@ -1,9 +1,13 @@
 import wandb
 from qres.config import config
 from pprint import pprint
+from threading import Lock, get_ident
 
 
 class Logger:
+    """
+    Handles multithreading
+    """
     def __init__(self):
         if config.wandb_enabled:
             self.wandb = wandb.init(
@@ -11,13 +15,19 @@ class Logger:
                 config=config.__dict__,
             )
         self.attrs = {}
+        self._lock = Lock()
 
     def put(self, **kwargs):
-        self.attrs.update(kwargs)
+        thread_id = get_ident()
+        with self._lock:
+            self.attrs[thread_id] = self.attrs.get(thread_id, {})
+            self.attrs[thread_id].update(kwargs)
 
     def push_attrs(self):
-        self.log(**self.attrs)
-        self.attrs = {}
+        thread_id = get_ident()
+        self.log(**self.attrs[thread_id])
+        with self._lock:
+            self.attrs[thread_id] = {}
 
     def log(self, **kwargs):
         if config.wandb_enabled:
