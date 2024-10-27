@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 import yaml
-from qres.structure_prediction import N_AMINO_ACIDS
 
+AMINO_ACIDS = list("ACDEFGHIKLMNPQRSTVWY")
+N_AMINO_ACIDS = len(AMINO_ACIDS)
 
 @dataclass
 class Config:

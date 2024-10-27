@@ -1,7 +1,7 @@
 import torch
 import random
-from qres.structure_prediction import AMINO_ACIDS, N_AMINO_ACIDS, StructurePredictor
-from qres.config import config
+from qres.structure_prediction import StructurePredictor
+from qres.config import config, AMINO_ACIDS, N_AMINO_ACIDS
 from jaxtyping import Float, Bool
 from typing import Tuple
 from qres.logger import logger
@@ -11,19 +11,36 @@ TODO:
 - step through action selection
 
 """
-
+def validate_states(states: Float[torch.Tensor, "batch (seq residue amino)"]):
+    assert states.shape == (
+        config.structure_predictor_batch_size,
+        config.state_dim,
+    )
+    total_states = states.view(
+        config.structure_predictor_batch_size,
+        2,
+        config.sequence_length,
+        N_AMINO_ACIDS,
+    )
+    assert (
+        total_states.sum(dim=-1) == 1
+    ).all(), "All residues should have exactly one amino acid selected"
 
 class Environment:
     def __init__(self, device: str):
         self.device = device
+        logger.log_str(f"Initializing environment on device {device}")
         self.structure_predictor = StructurePredictor(device=device)
+        logger.log_str(f"Initialized structure predictor")
 
         self.states = torch.stack(
             [self._init_state() for _ in range(config.structure_predictor_batch_size)]
         )
-        self.validate_states(self.states)
+        validate_states(self.states)
 
-        self.steps_done = torch.zeros(config.structure_predictor_batch_size, device=self.device)
+        self.steps_done = torch.zeros(
+            config.structure_predictor_batch_size, device=self.device
+        )
 
     def _init_state(self) -> Float[torch.Tensor, "(seq residue amino)"]:
         sequence = torch.zeros(
@@ -81,7 +98,7 @@ class Environment:
             else:
                 self.states[i] = next_states[i]
 
-        self.validate_states(self.states)
+        validate_states(self.states)
 
         return self.states.clone(), rewards
 
@@ -90,8 +107,12 @@ class Environment:
         seqs: Float[torch.Tensor, "batch (residue amino_acid)"],
         actions: Bool[torch.Tensor, "batch (residue amino_acid)"],
     ) -> Float[torch.Tensor, "batch (residue amino_acid)"]:
-        seqs = seqs.view(config.structure_predictor_batch_size, config.sequence_length, N_AMINO_ACIDS)
-        actions = actions.view(config.structure_predictor_batch_size, config.sequence_length, N_AMINO_ACIDS)
+        seqs = seqs.view(
+            config.structure_predictor_batch_size, config.sequence_length, N_AMINO_ACIDS
+        )
+        actions = actions.view(
+            config.structure_predictor_batch_size, config.sequence_length, N_AMINO_ACIDS
+        )
         next_seqs = seqs.clone()
 
         # Find the residue where the action is 1 and replace the corresponding
@@ -101,19 +122,12 @@ class Environment:
             batch_indices, residue_indices
         ].to(dtype=next_seqs.dtype)
 
-        return next_seqs.view(config.structure_predictor_batch_size, config.sequence_length * N_AMINO_ACIDS)
-
-    def validate_states(self, states: Float[torch.Tensor, "batch (seq residue amino)"]):
-        assert states.shape == (
+        return next_seqs.view(
             config.structure_predictor_batch_size,
-            config.state_dim,
+            config.sequence_length * N_AMINO_ACIDS,
         )
-        total_states = states.view(
-            config.structure_predictor_batch_size, 2, config.sequence_length, N_AMINO_ACIDS
-        )
-        assert (
-            total_states.sum(dim=-1) == 1
-        ).all(), "All residues should have exactly one amino acid selected"
+
+
 
     def decode_seq(self, seq: Float[torch.Tensor, "(residue amino)"]) -> str:
         seq = seq.view(config.sequence_length, N_AMINO_ACIDS)
@@ -130,11 +144,16 @@ class Environment:
         seqs_str = [self.decode_seq(seq) for seq in seqs]
 
         if config.fake_structure_prediction:
-            confidences = torch.rand(config.structure_predictor_batch_size, device=self.device)
+            confidences = torch.rand(
+                config.structure_predictor_batch_size, device=self.device
+            )
         else:
             pdbs = self.structure_predictor.predict_structure(seqs_str)
             confidences = torch.tensor(
-                [self.structure_predictor.overall_confidence_from_pdb(pdb) for pdb in pdbs],
+                [
+                    self.structure_predictor.overall_confidence_from_pdb(pdb)
+                    for pdb in pdbs
+                ],
                 device=self.device,
             )
 

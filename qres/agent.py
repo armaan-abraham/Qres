@@ -2,17 +2,17 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-from qres.structure_prediction import N_AMINO_ACIDS
 from qres.config import config
 from jaxtyping import Float, Bool
 from torch import Tensor
 from qres.buffer import Buffer
 from qres.logger import logger
+from qres.environment import validate_states
 
 
 class DQN(nn.Module):
     def __init__(self):
-        super(DQN, self).__init__()
+        super().__init__()
 
         hidden_size = 256
 
@@ -27,17 +27,26 @@ class DQN(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+def validate_actions(actions: Bool[Tensor, "batch action_dim"]):
+    assert actions.shape == (
+        config.train_batch_size,
+        config.action_dim,
+    )
+    assert actions.dtype == torch.bool, f"Expected bool, got {actions.dtype}"
+    assert (actions.sum(dim=1) == 1).all(), "Actions must be one-hot encoded"
 
-class Agent:
+class Agent(torch.nn.Module):
     def __init__(self, device: str):
+        super().__init__()
         self.device = device
+        self.steps_done = torch.zeros(1, device=device, dtype=torch.int32)
+
         self.policy_net = DQN().to(device)
         self.target_net = DQN().to(device)
         self.optimizer = optim.AdamW(
             self.policy_net.parameters(), lr=config.lr, amsgrad=True
         )
 
-        self.steps_done = 0
         self.epsilon_start = config.epsilon_start
         self.epsilon_end = config.epsilon_end
         self.epsilon_decay = config.epsilon_decay
@@ -48,16 +57,8 @@ class Agent:
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
 
-    def validate_actions(self, actions: Bool[Tensor, "batch action_dim"]):
-        assert actions.shape == (
-            config.train_batch_size,
-            config.action_dim,
-        )
-        assert actions.dtype == torch.bool, f"Expected bool, got {actions.dtype}"
-        assert (actions.sum(dim=1) == 1).all(), "Actions must be one-hot encoded"
-
     def get_epsilon(self):
-        return self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(
+        return self.epsilon_end + (self.epsilon_start - self.epsilon_end) * torch.exp(
             -1.0 * self.steps_done / self.epsilon_decay
         )
 
@@ -94,7 +95,7 @@ class Agent:
             )
             actions[random_mask, random_actions] = True
 
-        self.validate_actions(actions)
+        validate_actions(actions)
 
         return actions
 
@@ -154,11 +155,16 @@ class Agent:
 
     def train(self, buffer: Buffer):
         """Train for specified number of iterations, then update target network"""
-        assert buffer.size >= config.train_batch_size
         assert config.train_batch_size <= config.structure_predictor_batch_size
+        assert buffer.size >= config.train_batch_size, f"Buffer has only {buffer.size} samples, but {config.train_batch_size} are required"
         total_loss = 0
         for _ in range(config.train_iter):
-            states, actions, next_states, rewards = buffer.sample(config.train_batch_size)
+            states, actions, next_states, rewards = buffer.sample(
+                config.train_batch_size
+            )
+            validate_actions(actions)
+            validate_states(states)
+            validate_states(next_states)
             loss = self.train_step(states, actions, next_states, rewards)
             total_loss += loss
 
@@ -171,17 +177,21 @@ class Agent:
         self.device = device
         self.policy_net = self.policy_net.to(device)
         self.target_net = self.target_net.to(device)
+        self.steps_done = self.steps_done.to(device)
         return self
+
+    def copy_(self, other):
+        self.policy_net.load_state_dict(other.policy_net.state_dict())
+        self.target_net.load_state_dict(other.target_net.state_dict())
+        self.optimizer.load_state_dict(other.optimizer.state_dict())
+        for key, value in other.optimizer.state_dict()["state"].items():
+            print(key, type(value))
+        for item in other.optimizer.state_dict()["param_groups"]:
+            print(item)
+        self.steps_done.copy_(other.steps_done)
 
     def clone(self):
         new_agent = Agent(self.device)
-        new_agent.policy_net.load_state_dict(self.policy_net.state_dict())
-        new_agent.target_net.load_state_dict(self.target_net.state_dict())
-        new_agent.optimizer = optim.AdamW(
-            new_agent.policy_net.parameters(), 
-            lr=config.lr,
-            amsgrad=True
-        )
-        new_agent.steps_done = self.steps_done
+        new_agent.copy_(self)
+        logger.log(Msg="Agent cloned", StepsDone=new_agent.steps_done.item())
         return new_agent
-

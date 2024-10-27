@@ -3,6 +3,7 @@ from qres.multi_train import MultiTrainer
 from qres.config import config
 from qres.logger import logger
 from pathlib import Path
+import torch.multiprocessing as mp
 
 save_dir = Path(__file__).parent / "data"
 save_dir.mkdir(parents=True, exist_ok=True)
@@ -14,22 +15,23 @@ def get_curr_save_dir():
     return curr_save_dir
 
 
-try:
-    if config.train_type == "multi-gpu":
-        trainer = MultiTrainer()
-    elif config.train_type == "single-gpu":
-        trainer = SingleTrainer()
-    else:
-        raise ValueError(f"Invalid train type: {config.train_type}")
-    trainer.run()
-finally:
-    if config.save_enabled:
-        curr_save_dir = get_curr_save_dir()
-        print(f"Saving to {curr_save_dir}")
-        if not curr_save_dir.exists():
-            curr_save_dir.mkdir(parents=True, exist_ok=True)
-        trainer.agent.save_model(curr_save_dir / "model.pt")
-        trainer.buffer.save(curr_save_dir / "buffer.pth")
-        config.save(curr_save_dir / "config.yaml")
-    trainer.shutdown()
-    logger.finish()
+if __name__ == "__main__":
+    try:
+        if config.train_type == "multi-gpu":
+            trainer = MultiTrainer()
+        elif config.train_type == "single-gpu":
+            trainer = SingleTrainer()
+        else:
+            raise ValueError(f"Invalid train type: {config.train_type}")
+        trainer.run()
+    finally:
+        if config.save_enabled:
+            curr_save_dir = get_curr_save_dir()
+            print(f"Saving to {curr_save_dir}")
+            if not curr_save_dir.exists():
+                curr_save_dir.mkdir(parents=True, exist_ok=True)
+            trainer.agent.save_model(curr_save_dir / "model.pt")
+            trainer.buffer.save(curr_save_dir / "buffer.pth")
+            config.save(curr_save_dir / "config.yaml")
+        trainer.shutdown()
+        logger.finish()
