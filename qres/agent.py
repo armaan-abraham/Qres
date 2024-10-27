@@ -20,10 +20,7 @@ class DQN(nn.Module):
 
         layers = [nn.Linear(config.state_dim, self.hidden_size), nn.ReLU()]
         for _ in range(self.n_hidden - 1):
-            layers.extend([
-                nn.Linear(self.hidden_size, self.hidden_size),
-                nn.ReLU()
-            ])
+            layers.extend([nn.Linear(self.hidden_size, self.hidden_size), nn.ReLU()])
         layers.append(nn.Linear(self.hidden_size, config.action_dim))
 
         self.model = nn.Sequential(*layers)
@@ -33,7 +30,9 @@ class DQN(nn.Module):
 
 
 def validate_actions(actions: Bool[Tensor, "batch action_dim"]):
-    assert actions.shape[1] == config.action_dim, f"Expected actions.shape[1] == {config.action_dim}, got {actions.shape[1]}"
+    assert (
+        actions.shape[1] == config.action_dim
+    ), f"Expected actions.shape[1] == {config.action_dim}, got {actions.shape[1]}"
     assert actions.dtype == torch.bool, f"Expected bool, got {actions.dtype}"
     assert (actions.sum(dim=1) == 1).all(), "Actions must be one-hot encoded"
 
@@ -190,7 +189,7 @@ class Agent(torch.nn.Module):
         # Update target network after all iterations
         self.update_target_net()
         avg_loss = total_loss / config.train_iter
-        logger.put(Loss=avg_loss)
+        logger.log(Loss=avg_loss)
 
     def to(self, device: str):
         inst = self.clone()

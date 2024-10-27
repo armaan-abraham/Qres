@@ -1,10 +1,10 @@
 from pathlib import Path
 
+import wandb
 from qres.config import config
 from qres.logger import logger
 from qres.multi_train import MultiTrainer
 from qres.single_train import SingleTrainer
-import wandb
 
 save_dir = Path(__file__).parent / "data"
 save_dir.mkdir(parents=True, exist_ok=True)
@@ -43,11 +43,7 @@ if __name__ == "__main__":
         trainer.run()
     finally:
         if config.save_enabled:
-            print(f"Saving to {curr_save_dir}")
-            if not curr_save_dir.exists():
-                curr_save_dir.mkdir(parents=True, exist_ok=True)
-            trainer.agent.save_model(curr_save_dir / "model.pt")
-            trainer.buffer.save(curr_save_dir / "buffer.pth")
+            trainer.save()
             config.save(curr_save_dir / "config.yaml")
         if config.wandb_enabled:
             wandb.finish()

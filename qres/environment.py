@@ -16,12 +16,17 @@ TODO:
 
 
 def validate_states(states: torch.Tensor):
-    assert states.shape[1] == config.state_dim, f"States have incorrect shape {states.shape[1]} != {config.state_dim}"
-    assert states.dtype == config.state_dtype, f"States have incorrect data type {states.dtype} != {config.state_dtype}"
+    assert (
+        states.shape[1] == config.state_dim
+    ), f"States have incorrect shape {states.shape[1]} != {config.state_dim}"
+    assert (
+        states.dtype == config.state_dtype
+    ), f"States have incorrect data type {states.dtype} != {config.state_dtype}"
     # Ensure all amino acid indices are valid
     assert (
         (states >= 0) & (states < N_AMINO_ACIDS)
     ).all(), "Invalid amino acid indices in states"
+
 
 class Environment:
     def __init__(self, device: str):
@@ -53,7 +58,9 @@ class Environment:
         current_sequence = sequence.clone()
 
         # Concatenate the initial and current sequences to form the state
-        state = torch.cat([initial_sequence, current_sequence], dim=0)  # Shape: (2 * sequence_length,)
+        state = torch.cat(
+            [initial_sequence, current_sequence], dim=0
+        )  # Shape: (2 * sequence_length,)
         return state
 
     def get_states(self) -> Bool[torch.Tensor, "batch (seq residue amino)"]:
@@ -64,8 +71,8 @@ class Environment:
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # Split the state into initial and current sequences
         split_dim = config.sequence_length
-        init_seqs = states[:, :split_dim]    # Shape: (batch_size, sequence_length)
-        seqs = states[:, split_dim:]         # Shape: (batch_size, sequence_length)
+        init_seqs = states[:, :split_dim]  # Shape: (batch_size, sequence_length)
+        seqs = states[:, split_dim:]  # Shape: (batch_size, sequence_length)
         return init_seqs, seqs
 
     def step(
@@ -110,7 +117,9 @@ class Environment:
         # Find the residue where the action is 1 and replace the corresponding
         # residue in the sequence
         batch_indices, residue_indices, amino_indices = torch.where(actions == 1)
-        next_seqs[batch_indices, residue_indices] = amino_indices.to(dtype=config.state_dtype)
+        next_seqs[batch_indices, residue_indices] = amino_indices.to(
+            dtype=config.state_dtype
+        )
 
         return next_seqs
 
@@ -121,9 +130,7 @@ class Environment:
         self,
         init_seqs: torch.Tensor,
         seqs: torch.Tensor,
-    ) -> Tuple[
-        torch.Tensor, Float[torch.Tensor, "batch 1"]
-    ]:
+    ) -> Tuple[torch.Tensor, Float[torch.Tensor, "batch 1"]]:
         seqs_str = [self.decode_seq(seq) for seq in seqs]
 
         if config.fake_structure_prediction:
@@ -145,7 +152,7 @@ class Environment:
             init_seqs != seqs
         ).float().mean(dim=1)
         rewards = confidences - distance_penalty
-        logger.put(
+        logger.log(
             DistancePenalty=distance_penalty.mean().item(),
             Confidence=confidences.mean().item(),
             Reward=rewards.mean().item(),

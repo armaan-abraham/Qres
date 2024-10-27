@@ -1,10 +1,10 @@
 import random
+from pathlib import Path
 
 import numpy as np
 import torch
 from tqdm import tqdm
 
-from pathlib import Path
 from qres.agent import Agent
 from qres.buffer import Buffer
 from qres.config import config

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
-import torch
 
+import torch
 import yaml
 
 AMINO_ACIDS = list("ACDEFGHIKLMNPQRSTVWY")
@@ -30,9 +30,9 @@ class Config:
     epsilon_decay: int = 1000
     tau: float = 0.005
     lr: float = 1e-3
-    distance_penalty_coeff: float = 5e-3
+    distance_penalty_coeff: float = 1e-2
 
-    save_interval: int = 100
+    save_interval: int = 50
 
     max_episode_length: int = 200
 
@@ -56,13 +56,30 @@ class Config:
         return N_AMINO_ACIDS * self.sequence_length
 
     def save(self, path: Path):
+        # Get all non-property attributes that aren't builtins
+        attrs = {
+            k: v
+            for k, v in vars(self).items()
+            if not k.startswith("__")
+            and not isinstance(getattr(type(self), k, None), property)
+        }
+
+        # Handle torch.dtype specially
+        attrs["state_dtype"] = str(self.state_dtype)
+
         with open(path, "w") as f:
-            yaml.dump(self.__dict__, f)
+            yaml.dump(attrs, f)
 
     @classmethod
     def load(cls, path: Path) -> "Config":
         with open(path, "r") as f:
             config_dict = yaml.safe_load(f)
+
+        # Convert state_dtype back to torch.dtype
+        if "state_dtype" in config_dict:
+            dtype_str = config_dict["state_dtype"]
+            config_dict["state_dtype"] = getattr(torch, dtype_str.split(".")[-1])
+
         return cls(**config_dict)
 
 

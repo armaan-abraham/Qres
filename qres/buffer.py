@@ -1,3 +1,4 @@
+from multiprocessing import Value
 from typing import Dict
 
 import torch
@@ -5,13 +6,13 @@ from jaxtyping import Bool, Float
 from torch import Tensor
 
 from qres.config import config
-from multiprocessing import Value
 
 
 class Buffer:
     """
     Shared memory buffer for multiprocessing.
     """
+
     def __init__(self, device: str):
         assert device == "cpu"
         self.should_share_memory = False
@@ -36,13 +37,12 @@ class Buffer:
         )
         self.rewards = torch.zeros((config.max_buffer_size, 1), device=self.device)
 
-    
     def get_size(self):
         if self.should_share_memory:
             return self.size.value
         else:
             return self.size
-    
+
     def get_pos(self):
         if self.should_share_memory:
             return self.pos.value
@@ -84,7 +84,9 @@ class Buffer:
 
     def sample(self, batch_size):
         max_pos = (
-            config.max_buffer_size if self.get_size() == config.max_buffer_size else self.get_pos()
+            config.max_buffer_size
+            if self.get_size() == config.max_buffer_size
+            else self.get_pos()
         )
         indices = torch.randint(0, max_pos, (batch_size,), device=self.device)
 
@@ -154,4 +156,3 @@ class Buffer:
                 total_bytes += bytes
                 print(f"{attr}: {bytes / 1024 / 1024:.2f} MB")
         print(f"Total: {total_bytes / 1024 / 1024:.2f} MB")
-
