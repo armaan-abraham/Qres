@@ -152,7 +152,7 @@ class Environment:
             init_seqs != seqs
         ).float().mean(dim=1)
         rewards = confidences - distance_penalty
-        logger.log(
+        logger.log_attrs(
             DistancePenalty=distance_penalty.mean().item(),
             Confidence=confidences.mean().item(),
             Reward=rewards.mean().item(),

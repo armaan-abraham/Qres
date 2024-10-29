@@ -12,13 +12,13 @@ N_AMINO_ACIDS = len(AMINO_ACIDS)
 class Config:
     sequence_length: int = 30
 
-    structure_predictor_batch_size: int = int(500)
+    structure_predictor_batch_size: int = int(10)
 
     max_buffer_size: int = int(1e7)
-    n_epochs: int = int(5e3)
+    n_epochs: int = int(1e3)
 
-    train_iter: int = int(100)
-    train_batch_size: int = int(1500)
+    train_iter: int = int(75)
+    train_batch_size: int = int(10)
 
     @property
     def train_interval(self):

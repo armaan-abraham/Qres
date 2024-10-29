@@ -41,6 +41,9 @@ if __name__ == "__main__":
         trainer = trainer(curr_save_dir)
 
         trainer.run()
+    except Exception as e:
+        logger.log(Error=e)
+        raise e
     finally:
         if config.save_enabled:
             trainer.save()
