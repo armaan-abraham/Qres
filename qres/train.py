@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import wandb
 from qres.config import config
 from qres.logger import logger
 from qres.multi_train import MultiTrainer
@@ -17,12 +16,6 @@ def get_curr_save_dir():
 
 
 if __name__ == "__main__":
-    if config.wandb_enabled:
-        wandb.init(
-            project=config.project_name,
-            config=config.__dict__,
-            name=config.run_name,
-        )
     try:
         if config.train_type == "multi-gpu":
             trainer = MultiTrainer
@@ -35,6 +28,7 @@ if __name__ == "__main__":
             curr_save_dir = get_curr_save_dir()
             if not curr_save_dir.exists():
                 curr_save_dir.mkdir(parents=True, exist_ok=True)
+            config.save(curr_save_dir / "config.yaml")
         else:
             curr_save_dir = None
 
@@ -48,5 +42,3 @@ if __name__ == "__main__":
         if config.save_enabled:
             trainer.save()
             config.save(curr_save_dir / "config.yaml")
-        if config.wandb_enabled:
-            wandb.finish()

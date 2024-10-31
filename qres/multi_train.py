@@ -1,12 +1,10 @@
-from copy import deepcopy
 from enum import Enum
 from pathlib import Path
 
 import torch
+import traceback
 import torch.multiprocessing as mp
-from tqdm import tqdm
 
-import wandb
 from qres.agent import Agent
 from qres.buffer import Buffer
 from qres.config import config
@@ -45,7 +43,6 @@ trains agent, and then copies agent back to global memory
 """
 
 
-# TODO: steps done in agent to shared memory
 
 
 class TaskType(Enum):
@@ -60,23 +57,13 @@ def worker(
     buffer: Buffer,
     buffer_lock,
     device_id: int,
-    wandb_run_id: str = None,  # Add wandb run ID parameter
 ):
     """
     Handles both structure prediction and training
     """
     device = f"cuda:{device_id}"
     try:
-        # Initialize wandb in worker process if enabled
-        if config.wandb_enabled:
-            wandb.init(
-                project=config.project_name,
-                id=wandb_run_id,  # Use the same run ID
-                resume="allow",
-                name=config.run_name,
-            )
         env = Environment(device=device)
-        logger_kwargs = {"Worker": device_id}
     except Exception as e:
         results.put((TaskType.ERROR, {"error": e}))
         raise
@@ -85,27 +72,16 @@ def worker(
         while True:
             task = tasks.get()
 
-            logger_kwargs_local = deepcopy(logger_kwargs)
-            logger_kwargs_local["MemoryMB"] = torch.cuda.memory_allocated(device) / 1e6
-            logger.log(**logger_kwargs_local)
 
             if task is None:
                 break
 
             task_type = task["type"]
             agent = task["agent"]
-            task_id = task["task_id"]
-            logger.step = task_id
-            logger_kwargs_local["TaskID"] = task_id
 
             if task_type == TaskType.PREDICT_STRUCTURE:
-                logger_kwargs_local["Task"] = "predict_structure"
-                logger_kwargs_local["Msg"] = "started"
-                logger.log(**logger_kwargs_local)
 
                 states = env.get_states()
-                logger_kwargs_local["Msg"] = "got states"
-                logger.log(**logger_kwargs_local)
 
                 assert agent.device == "cpu"
                 agent = agent.to(device)
@@ -115,8 +91,6 @@ def worker(
                     actions = agent.select_actions(states)
                     next_states, rewards = env.step(states, actions)
 
-                logger_kwargs_local["Msg"] = "stepped environment"
-                logger.log(**logger_kwargs_local)
 
                 # Add experiences to buffer
                 with buffer_lock:
@@ -127,33 +101,33 @@ def worker(
                         rewards.clone().to("cpu"),
                     )
 
-                logger_kwargs_local["Msg"] = "added experiences to buffer"
-                logger.log(**logger_kwargs_local)
-
-                results.put((TaskType.PREDICT_STRUCTURE, {}))
+                results.put(
+                    (
+                        TaskType.PREDICT_STRUCTURE,
+                        {
+                            "reward": env.last_reward,
+                            "confidence": env.last_confidence,
+                            "distance_penalty": env.last_distance_penalty,
+                            "device_id": device_id,
+                            "task_id": task["task_id"],
+                            "gpu_memory_allocated": torch.cuda.memory_allocated(device) / 1e9,
+                            "gpu_memory_reserved": torch.cuda.memory_reserved(device) / 1e9,
+                        },
+                    )
+                )
                 del (
                     agent,
                     states,
                     actions,
                     next_states,
                     rewards,
-                    logger_kwargs_local,
                 )
-
             elif task_type == TaskType.TRAIN_AGENT:
-                logger_kwargs_local["Task"] = "train_agent"
-                logger_kwargs_local["Msg"] = "started"
-                logger.log(**logger_kwargs_local)
-
                 assert agent.device == "cpu"
+
                 agent = agent.to(device)
 
                 with buffer_lock:
-                    logger_kwargs_local = deepcopy(logger_kwargs)
-                    logger_kwargs_local["MemoryMB"] = (
-                        torch.cuda.memory_allocated(device) / 1e6
-                    )
-                    logger.log(**logger_kwargs_local)
 
                     assert buffer.device == "cpu"
                     buffer_local = buffer.to(device)
@@ -162,19 +136,25 @@ def worker(
 
                 agent.train(buffer_local)
 
-                logger_kwargs_local["Msg"] = "trained agent"
-                logger.log(**logger_kwargs_local)
-
-                results.put((TaskType.TRAIN_AGENT, {"agent": agent.to("cpu")}))
-                del agent, buffer_local, logger_kwargs_local
+                results.put(
+                    (
+                        TaskType.TRAIN_AGENT,
+                        {
+                            "agent": agent.to("cpu"),
+                            "device_id": device_id,
+                            "task_id": task["task_id"],
+                            "gpu_memory_allocated": torch.cuda.memory_allocated(device) / 1e9,
+                            "gpu_memory_reserved": torch.cuda.memory_reserved(device) / 1e9,
+                        },
+                    )
+                )
+                del agent, buffer_local
             else:
                 raise ValueError(f"Unknown task type: {task_type}")
             torch.cuda.empty_cache()
     except Exception as e:
-        logger_kwargs_local["Task"] = "error"
-        logger_kwargs_local["Msg"] = str(e)
-        logger.log(**logger_kwargs_local)
-        results.put((TaskType.ERROR, {"error": e}))
+        error_msg = traceback.format_exc()
+        results.put((TaskType.ERROR, {"error": error_msg}))
         raise
 
 
@@ -183,9 +163,6 @@ class MultiTrainer:
         self.save_dir = save_dir
         self.device_ids = list(range(torch.cuda.device_count()))
         self.num_workers = len(self.device_ids)
-        self.wandb_run_id = (
-            wandb.run.id if config.wandb_enabled else None
-        )  # Store wandb run ID
 
     def run(self):
         mp.set_start_method("spawn", force=True)
@@ -199,24 +176,24 @@ class MultiTrainer:
         self.buffer.print_memory_usage()
         buffer_lock = mp.Lock()
 
-        try:
-            workers = []
-            for i in range(self.num_workers):
-                logger.log_str(f"Starting worker {i}")
-                p = mp.Process(
-                    target=worker,
-                    args=(
-                        tasks,
-                        results,
-                        self.buffer,
-                        buffer_lock,
-                        self.device_ids[i],
-                        self.wandb_run_id,  # Pass wandb run ID to workers
-                    ),
-                )
-                p.start()
-                workers.append(p)
+        workers = []
+        for i in range(self.num_workers):
+            logger.log_str(f"Starting worker {i}")
+            p = mp.Process(
+                target=worker,
+                args=(
+                    tasks,
+                    results,
+                    self.buffer,
+                    buffer_lock,
+                    i,
+                ),
+            )
+            p.start()
+            workers.append(p)
 
+
+        try:
             tasks_since_last_train = 0
             # We only want one training task to be in progress at a time
             prev_train_completed = True
@@ -239,7 +216,9 @@ class MultiTrainer:
                     and self.buffer.get_size() >= config.train_batch_size
                 ):
                     logger.log(
-                        Msg="Adding train agent task to queue", TaskID=task_id
+                        Msg="Task created",
+                        TaskType="Train",
+                        TaskID=task_id,
                     )
                     tasks.put(
                         (
@@ -254,7 +233,8 @@ class MultiTrainer:
                     tasks_since_last_train = 0
                 else:
                     logger.log(
-                        Msg="Adding predict structure task to queue",
+                        Msg="Task created",
+                        TaskType="Structure",
                         TaskID=task_id,
                     )
                     tasks.put(
@@ -263,6 +243,7 @@ class MultiTrainer:
                                 "type": TaskType.PREDICT_STRUCTURE,
                                 "agent": self.agent,
                                 "task_id": task_id,
+
                             }
                         )
                     )
@@ -275,18 +256,28 @@ class MultiTrainer:
                     # Take result from queue
                     logger.log_str("Waiting for result from queue")
                     task_type, result = results.get()
+
                     if task_type == TaskType.ERROR:
                         logger.log(Error=result["error"])
                         raise result["error"]
+
                     elif task_type == TaskType.TRAIN_AGENT:
                         assert result["agent"].device == "cpu", result[
                             "agent"
                         ].device
                         self.agent.copy_(result["agent"])
                         epoch += 1
-                        logger.log(Epoch=epoch)
                         prev_train_completed = True
-                        logger.log_str("Train agent task completed")
+
+                        logger.log(
+                            Msg="Task completed",
+                            TaskType="Train",
+                            Epoch=epoch,
+                            DeviceID=result["device_id"],
+                            TaskID=result["task_id"],
+                            GpuMemoryAllocated=result["gpu_memory_allocated"],
+                            GpuMemoryReserved=result["gpu_memory_reserved"],
+                        )
 
                         if (
                             config.save_enabled
@@ -295,9 +286,31 @@ class MultiTrainer:
                             self.save(epoch)
 
                     elif task_type == TaskType.PREDICT_STRUCTURE:
-                        logger.log_str("Predict structure task completed")
-                        logger.log(BufferSize=self.buffer.get_size())
+                        logger.log(
+                            Msg="Task completed",
+                            TaskType="Structure",
+                            TaskID=result["task_id"],
+                            DeviceID=result["device_id"],
+                            BufferSize=self.buffer.get_size(),
+                            Reward=result["reward"],
+                            Confidence=result["confidence"],
+                            DistancePenalty=result["distance_penalty"],
+                            GpuMemoryAllocated=result["gpu_memory_allocated"],
+                            GpuMemoryReserved=result["gpu_memory_reserved"],
+                        )
+
                     n_active_workers -= 1
+
+                # Print GPU memory usage for each device
+                for device_id in self.device_ids:
+                    allocated = torch.cuda.memory_allocated(device_id) / 1e9  # Convert to GB
+                    reserved = torch.cuda.memory_reserved(device_id) / 1e9    # Convert to GB
+                    logger.log(
+                        Msg="GPU Memory Usage",
+                        DeviceID=device_id,
+                        AllocatedGB=allocated,
+                        ReservedGB=reserved
+                    )
 
         finally:
             for _ in workers:
@@ -305,12 +318,13 @@ class MultiTrainer:
             for p in workers:
                 p.join()
 
-    def save(self, n_epochs: int = None):
+    def save(self, n_epochs: int | None = None):
         if n_epochs is None:
             n_epochs = "final"
-        print(f"Saving to {self.save_dir}, epoch {n_epochs}")
+        logger.log(
+            Msg="Saving model and buffer",
+            Epoch=n_epochs,
+            SaveDir=self.save_dir,
+        )
         self.agent.save_model(self.save_dir / f"model_{n_epochs}.pt")
         self.buffer.save(self.save_dir / f"buffer_{n_epochs}.pth")
-
-        if config.wandb_enabled:
-            wandb.save(self.save_dir / f"model_{n_epochs}.pt")

@@ -16,6 +16,7 @@ dependencies = [
     "biopython>=1.83",
     "jaxtyping>=0.2.34",
     "wandb>=0.18.5",
+    "accelerate>=1.0.1",
 ]
 
 [tool.rye]

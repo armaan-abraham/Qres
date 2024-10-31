@@ -5,7 +5,6 @@ import torch
 from jaxtyping import Bool, Float
 
 from qres.config import AMINO_ACIDS, N_AMINO_ACIDS, config
-from qres.logger import logger
 from qres.structure_prediction import StructurePredictor
 
 """
@@ -31,9 +30,7 @@ def validate_states(states: torch.Tensor):
 class Environment:
     def __init__(self, device: str):
         self.device = device
-        logger.log_str(f"Initializing environment on device {device}")
         self.structure_predictor = StructurePredictor(device=device)
-        logger.log_str("Initialized structure predictor")
 
         self.states = torch.stack(
             [self._init_state() for _ in range(config.structure_predictor_batch_size)]
@@ -152,11 +149,10 @@ class Environment:
             init_seqs != seqs
         ).float().mean(dim=1)
         rewards = confidences - distance_penalty
-        logger.log_attrs(
-            DistancePenalty=distance_penalty.mean().item(),
-            Confidence=confidences.mean().item(),
-            Reward=rewards.mean().item(),
-        )
+
+        self.last_distance_penalty = distance_penalty.mean().item()
+        self.last_confidence = confidences.mean().item()
+        self.last_reward = rewards.mean().item()
 
         next_states = torch.cat([init_seqs, seqs], dim=1)
 

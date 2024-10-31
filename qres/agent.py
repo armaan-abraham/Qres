@@ -8,7 +8,6 @@ from torch import Tensor
 from qres.buffer import Buffer
 from qres.config import config
 from qres.environment import validate_states
-from qres.logger import logger
 
 
 class DQN(nn.Module):
@@ -164,14 +163,7 @@ class Agent(torch.nn.Module):
             buffer.size >= config.train_batch_size
         ), f"Buffer has only {buffer.size} samples, but {config.train_batch_size} are required"
         total_loss = 0
-        logger.log(
-            Msg="Training",
-            StepsDone=self.steps_done,
-            OptimizerStateMeans={
-                k: v.mean().item()
-                for k, v in self.optimizer.state_dict()["state"].get(0, {}).items()
-            },
-        )
+
         for _ in range(config.train_iter):
             states, actions, next_states, rewards = buffer.sample(
                 config.train_batch_size
@@ -188,8 +180,9 @@ class Agent(torch.nn.Module):
 
         # Update target network after all iterations
         self.update_target_net()
-        avg_loss = total_loss / config.train_iter
-        logger.log(Loss=avg_loss)
+        loss_avg = total_loss / config.train_iter
+        return loss_avg
+
 
     def to(self, device: str):
         inst = self.clone()

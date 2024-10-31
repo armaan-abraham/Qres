@@ -11,15 +11,15 @@ from transformers.models.esm.openfold_utils.protein import to_pdb
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
-# Ensure that only one model is loaded in memory
 class StructurePredictor:
     def __init__(self, device="cuda"):
         self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
         self.model = EsmForProteinFolding.from_pretrained(
-            "facebook/esmfold_v1",
+            "facebook/esmfold_v1", device_map=device
         ).to(device)
         self.model.esm = self.model.esm.half()
+        self.model.esm = self.model.esm.to(device)
 
     def predict_structure(self, sequences: List[str]) -> List[str]:
         tokenized_input = self.tokenizer(
