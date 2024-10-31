@@ -80,6 +80,7 @@ def worker(
             agent = task["agent"]
 
             if task_type == TaskType.PREDICT_STRUCTURE:
+                raise BaseException("ye")
 
                 states = env.get_states()
 
@@ -153,6 +154,7 @@ def worker(
                 raise ValueError(f"Unknown task type: {task_type}")
             torch.cuda.empty_cache()
     except Exception as e:
+        # results.put((TaskType.ERROR, {}))
         error_msg = traceback.format_exc()
         results.put((TaskType.ERROR, {"error": error_msg}))
         raise
@@ -258,8 +260,11 @@ class MultiTrainer:
                     task_type, result = results.get()
 
                     if task_type == TaskType.ERROR:
+                        # try to get the next result with message
+                        # logger.log(Msg="Error in subprocess")
+                        # task_type, result = results.get()
                         logger.log(Error=result["error"])
-                        raise result["error"]
+                        raise Exception(result["error"])
 
                     elif task_type == TaskType.TRAIN_AGENT:
                         assert result["agent"].device == "cpu", result[
@@ -311,7 +316,10 @@ class MultiTrainer:
                         AllocatedGB=allocated,
                         ReservedGB=reserved
                     )
-
+        # except BaseException as e:
+        #     logger.log(Msg="Error in main process")
+        #     logger.log(Error=e)
+        #     raise e
         finally:
             for _ in workers:
                 tasks.put(None)
