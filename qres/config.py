@@ -38,7 +38,7 @@ class Config:
 
     # batch size
     structure_predictor_batch_size: int = int(500)
-    train_batch_size: int = int(5e3)
+    train_batch_size: int = int(2.5e3)
     @property
     def max_buffer_size(self):
         return self.n_epochs * self.train_batch_size
