@@ -33,7 +33,7 @@ class Config:
     distance_penalty_coeff: float = 5e-4
 
     # training scale/duration
-    n_epochs: int = int(5e3)
+    n_epochs: int = int(1e4)
     train_iter: int = int(150)
     max_episode_length: int = 50
 
@@ -61,7 +61,7 @@ class Config:
     d_mlp: int = 256
     d_head: int = 32
     n_heads: int = 4
-    n_layers: int = 3
+    n_layers: int = 2
     layer_norm_eps: float = 1e-5
 
     # save
