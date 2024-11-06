@@ -33,7 +33,7 @@ class Config:
 
     # training scale/duration
     n_epochs: int = int(5e3)
-    train_iter: int = int(300)
+    train_iter: int = int(150)
     max_episode_length: int = 50
 
     # batch size
