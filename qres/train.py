@@ -15,7 +15,7 @@ if __name__ == "__main__":
         wandb.init(
             project="qres",
             config=config,
-            name=f"run_{run_id}",
+            name=f"{run_id}",
         )
 
     save_dir = None
