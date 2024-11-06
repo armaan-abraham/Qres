@@ -32,14 +32,14 @@ class Config:
     distance_penalty_coeff: float = 5e-4
 
     # training scale/duration
-    max_buffer_size: int = int(5e6)
+    max_buffer_size: int = int(1e4)
     n_epochs: int = int(1e3)
-    train_iter: int = int(300)
+    train_iter: int = int(50)
     max_episode_length: int = 50
 
     # batch size
-    structure_predictor_batch_size: int = int(500)
-    train_batch_size: int = int(5000)
+    structure_predictor_batch_size: int = int(100)
+    train_batch_size: int = int(100)
 
     @property
     def train_interval(self):
@@ -63,9 +63,9 @@ class Config:
 
     # save
     save_interval: int = 100
-    save_enabled: bool = True
+    save_enabled: bool = False
 
-    wandb_enabled: bool = True
+    wandb_enabled: bool = False
 
     fake_structure_prediction: bool = False
 

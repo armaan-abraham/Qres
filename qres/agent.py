@@ -44,6 +44,8 @@ class ContentEmbedding(nn.Module):
         self, seqs: Int[Tensor, "sequence residue"]
     ) -> Float[Tensor, "sequence residue d_model"]:
         assert seqs.ndim == 2
+        assert seqs.dtype in [torch.int8, torch.int16, torch.int32]
+        seqs = seqs.to(dtype=torch.int32)
         # We just have one embedding vector for each amino acid
         result = self.W_embed[seqs]
         assert result.shape == (seqs.shape[0], seqs.shape[1], config.d_model)
@@ -360,8 +362,6 @@ class Agent(torch.nn.Module):
     def select_actions(
         self, states: Bool[Tensor, "batch state_dim"], greedy: bool = False
     ) -> Bool[Tensor, "batch action_dim"]:
-        if states.dtype != torch.float:
-            states = states.to(dtype=torch.float)
         eps_threshold = self.get_epsilon()
         sample = torch.rand(states.shape[0], device=self.device)
 
@@ -421,9 +421,9 @@ class Agent(torch.nn.Module):
 
     def train_step(
         self,
-        states: Bool[Tensor, "batch state_dim"],
+        states: Int[Tensor, "batch state_dim"],
         actions: Bool[Tensor, "batch action_dim"],
-        next_states: Bool[Tensor, "batch state_dim"],
+        next_states: Int[Tensor, "batch state_dim"],
         rewards: Float[Tensor, "batch 1"],
     ) -> float:
         """Single optimization step"""
@@ -462,7 +462,7 @@ class Agent(torch.nn.Module):
         ), f"Buffer has only {buffer.size} samples, but {config.train_batch_size} are required"
         total_loss = 0
         total_reward = 0
-        total_state_action_values_mean = 0
+        total_state_action_value = 0
 
         for step in range(config.train_iter):
             states, actions, next_states, rewards = buffer.sample(
@@ -471,9 +471,6 @@ class Agent(torch.nn.Module):
             validate_actions(actions)
             validate_states(states)
             validate_states(next_states)
-
-            states = states.to(dtype=torch.float)
-            next_states = next_states.to(dtype=torch.float)
 
             loss, state_action_value = self.train_step(
                 states, actions, next_states, rewards
