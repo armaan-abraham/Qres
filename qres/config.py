@@ -5,6 +5,7 @@ from typing import Optional
 
 import torch
 import yaml
+import petname
 
 AMINO_ACIDS = list("ACDEFGHIKLMNPQRSTVWY")
 N_AMINO_ACIDS = len(AMINO_ACIDS)
@@ -14,8 +15,7 @@ save_dir.mkdir(parents=True, exist_ok=True)
 
 
 def get_curr_run_iter():
-    iterations = [int(f.stem.split("_")[-1]) for f in save_dir.glob("*/")]
-    return max(iterations, default=0) + 1
+    return petname.generate(words=3, separator="-")
 
 
 def get_curr_save_dir():
@@ -65,9 +65,9 @@ class Config:
 
     # save
     save_interval: int = 100
-    save_enabled: bool = False
+    save_enabled: bool = True
 
-    wandb_enabled: bool = False
+    wandb_enabled: bool = True
 
     fake_structure_prediction: bool = False
 

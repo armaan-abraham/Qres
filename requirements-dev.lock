@@ -140,6 +140,8 @@ pandas==2.2.3
     # via seaborn
 parso==0.8.4
     # via jedi
+petname==2.6
+    # via qres
 pexpect==4.9.0
     # via ipython
 pillow==11.0.0
