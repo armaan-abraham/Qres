@@ -27,21 +27,25 @@ def get_curr_save_dir():
 
 @dataclass
 class Config:
-    sequence_length: int = 30
+    # training objective
+    seq_len: int = 30
     distance_penalty_coeff: float = 5e-4
 
-    structure_predictor_batch_size: int = int(500)
-
+    # training scale/duration
     max_buffer_size: int = int(5e6)
     n_epochs: int = int(1e3)
-
     train_iter: int = int(300)
+    max_episode_length: int = 50
+
+    # batch size
+    structure_predictor_batch_size: int = int(500)
     train_batch_size: int = int(5000)
 
     @property
     def train_interval(self):
         return self.train_batch_size / self.structure_predictor_batch_size
 
+    # DQN
     gamma: float = 0.99
     epsilon_start: float = 0.9
     epsilon_end: float = 0.05
@@ -50,14 +54,20 @@ class Config:
     update_target_every: int = 10
     lr: float = 3e-4
     l2_weight_decay: float = 1e-4
+    d_model: int = 128
+    d_mlp: int = 256
+    d_head: int = 32
+    n_heads: int = 4
+    n_layers: int = 3
+    layer_norm_eps: float = 1e-5
 
+    # save
     save_interval: int = 100
-
-    max_episode_length: int = 50
+    save_enabled: bool = True
 
     wandb_enabled: bool = True
+
     fake_structure_prediction: bool = False
-    save_enabled: bool = True
 
     train_type: str = "multi-gpu"
 
@@ -66,11 +76,11 @@ class Config:
     @property
     def state_dim(self):
         # Updated state dimension to account for indices instead of one-hot encoding
-        return 2 * self.sequence_length
+        return 2 * self.seq_len
 
     @property
     def action_dim(self):
-        return N_AMINO_ACIDS * self.sequence_length
+        return N_AMINO_ACIDS * self.seq_len
 
     def save(self, path: Path):
         # Get all non-property attributes that aren't builtins

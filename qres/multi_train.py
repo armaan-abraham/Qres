@@ -150,6 +150,7 @@ class MultiTrainer:
         results = mp.Queue()
 
         self.agent = Agent(device="cpu")
+        logger.info(f"Number of agent parameters: {self.agent.get_n_params()}")
 
         self.buffer = Buffer(device="cpu")
         self.buffer.share_memory()

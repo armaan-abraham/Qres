@@ -1,60 +1,322 @@
+import einops
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
-from jaxtyping import Bool, Float
+from einops import einsum
+from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 from qres.buffer import Buffer
-from qres.config import config
-from qres.environment import validate_states
+from qres.config import N_AMINO_ACIDS, config
+from qres.environment import parse_seqs_from_states, validate_states
+
+"""
+- embedding
+    - token embedding
+    - positional embedding
+    - d_model big enough to accommodate both init and current state
+- MLP
+- self-attention
+    - query, key, value
+    - output
+- residual connection
+- layer norm
+- final output (on entire sequence)
+"""
+
+
+class ContentEmbedding(nn.Module):
+    """
+    Instantiated separately for init and current state
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.W_embed = nn.Parameter(
+            nn.init.uniform_(
+                torch.empty(N_AMINO_ACIDS, config.d_model, dtype=torch.float), -1, 1
+            )
+        )
+
+    def forward(
+        self, seqs: Int[Tensor, "sequence residue"]
+    ) -> Float[Tensor, "sequence residue d_model"]:
+        assert seqs.ndim == 2
+        # We just have one embedding vector for each amino acid
+        result = self.W_embed[seqs]
+        assert result.shape == (seqs.shape[0], seqs.shape[1], config.d_model)
+        return result
+
+
+class PositionalEmbedding(nn.Module):
+    """
+    Only applied once for init and current state
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.W_pos = nn.Parameter(
+            nn.init.uniform_(
+                torch.empty(config.seq_len, config.d_model, dtype=torch.float), -1, 1
+            )
+        )
+
+    def forward(
+        self, seqs: Int[Tensor, "sequence residue"]
+    ) -> Float[Tensor, "sequence residue d_model"]:
+        assert seqs.ndim == 2
+        # we have a positional embedding vector for each sequence position
+        result = einops.repeat(
+            self.W_pos,
+            "residue d_model -> sequence residue d_model",
+            sequence=seqs.shape[0],
+        )
+        assert result.shape == (seqs.shape[0], seqs.shape[1], config.d_model)
+        return result
+
+
+class Embedding(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.content_init = ContentEmbedding()
+        self.content_current = ContentEmbedding()
+        self.positional = PositionalEmbedding()
+
+    def forward(
+        self, states: Int[Tensor, "batch state_dim"]
+    ) -> Float[Tensor, "batch residue d_model"]:
+        """
+        Each output is just seq_len length as we combine the init and current seqs
+        """
+        init_seqs, current_seqs = parse_seqs_from_states(states)
+        init_embeds = self.content_init(init_seqs)
+        current_embeds = self.content_current(current_seqs)
+        pos_embeds = self.positional(current_seqs)
+        result = init_embeds + pos_embeds + current_embeds
+        assert result.shape == (states.shape[0], config.seq_len, config.d_model)
+        return result
+
+
+class LayerNorm(nn.Module):
+    def __init__(self, scale=True):
+        super().__init__()
+        self.w = nn.Parameter(torch.ones(config.d_model, dtype=torch.float))
+        self.b = nn.Parameter(torch.zeros(config.d_model, dtype=torch.float))
+
+    def forward(
+        self, x: Float[Tensor, "seq seq_len d_model"]
+    ) -> Float[Tensor, "seq seq_len d_model"]:
+        mean = torch.mean(x, dim=-1, keepdim=True)
+        var = torch.var(x, dim=-1, keepdim=True, unbiased=False)
+        result = self.w * (x - mean) / torch.sqrt(var + config.layer_norm_eps) + self.b
+        assert result.shape == x.shape
+        return result
+
+
+class MLP(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.W_in = nn.Parameter(
+            nn.init.kaiming_uniform_(
+                torch.empty(config.d_model, config.d_mlp, dtype=torch.float).T
+            ).T
+        )
+        self.b_in = nn.Parameter(torch.zeros(config.d_mlp, dtype=torch.float))
+        self.W_out = nn.Parameter(
+            nn.init.kaiming_uniform_(
+                torch.empty(config.d_mlp, config.d_model, dtype=torch.float).T
+            ).T
+        )
+        self.b_out = nn.Parameter(torch.zeros(config.d_model, dtype=torch.float))
+
+    def forward(
+        self, x: Float[Tensor, "seq seq_len d_model"]
+    ) -> Float[Tensor, "seq seq_len d_model"]:
+        wx1 = (
+            einsum(
+                x, self.W_in, "seq seq_len d_model, d_model d_mlp -> seq seq_len d_mlp"
+            )
+            + self.b_in
+        )
+        a1 = F.relu(wx1)
+        wx2 = (
+            einsum(
+                a1,
+                self.W_out,
+                "seq seq_len d_mlp, d_mlp d_model -> seq seq_len d_model",
+            )
+            + self.b_out
+        )
+        return wx2
+
+
+class AttentionHead(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.W_Q = nn.Parameter(
+            nn.init.kaiming_uniform_(
+                torch.empty(config.d_model, config.d_head, dtype=torch.float).T
+            ).T
+        )
+        self.W_K = nn.Parameter(
+            nn.init.kaiming_uniform_(
+                torch.empty(config.d_model, config.d_head, dtype=torch.float).T
+            ).T
+        )
+        self.W_V = nn.Parameter(
+            nn.init.kaiming_uniform_(
+                torch.empty(config.d_model, config.d_head, dtype=torch.float).T
+            ).T
+        )
+        self.W_O = nn.Parameter(
+            nn.init.kaiming_uniform_(
+                torch.empty(config.d_head, config.d_model, dtype=torch.float).T
+            ).T
+        )
+
+        self.b_Q = nn.Parameter(torch.zeros(config.d_head, dtype=torch.float))
+        self.b_K = nn.Parameter(torch.zeros(config.d_head, dtype=torch.float))
+        self.b_V = nn.Parameter(torch.zeros(config.d_head, dtype=torch.float))
+        self.b_O = nn.Parameter(torch.zeros(config.d_model, dtype=torch.float))
+
+    def forward(
+        self, x: Float[Tensor, "seq residue d_model"]
+    ) -> Float[Tensor, "seq residue d_model"]:
+        Q = (
+            einsum(
+                x, self.W_Q, "seq residue d_model, d_model d_head -> seq residue d_head"
+            )
+            + self.b_Q
+        )
+        K = (
+            einsum(
+                x, self.W_K, "seq residue d_model, d_model d_head -> seq residue d_head"
+            )
+            + self.b_K
+        )
+        V = (
+            einsum(
+                x, self.W_V, "seq residue d_model, d_model d_head -> seq residue d_head"
+            )
+            + self.b_V
+        )
+
+        dot_prods = einsum(
+            Q,
+            K,
+            "seq residue_Q d_head, seq residue_K d_head -> seq residue_Q residue_K",
+        ) / np.sqrt(config.d_head)
+
+        attn = F.softmax(dot_prods, dim=-1)
+
+        Z = einsum(
+            attn,
+            V,
+            "seq residue_Q residue_K, seq residue_K d_head -> seq residue_Q d_head",
+        )
+
+        out = (
+            einsum(
+                Z,
+                self.W_O,
+                "seq residue_Q d_head, d_head d_model -> seq residue_Q d_model",
+            )
+            + self.b_O
+        )
+        assert out.shape == (x.shape[0], x.shape[1], config.d_model)
+        return out
+
+
+class Attention(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.heads = nn.ModuleList([AttentionHead() for _ in range(config.n_heads)])
+
+    def forward(
+        self, x: Float[Tensor, "seq residue d_model"]
+    ) -> Float[Tensor, "seq residue d_model"]:
+        result_expanded = torch.stack([head(x) for head in self.heads])
+        assert result_expanded.shape == (
+            config.n_heads,
+            x.shape[0],
+            x.shape[1],
+            config.d_model,
+        )
+        result = einops.reduce(
+            result_expanded, "n_heads seq residue d_model -> seq residue d_model", "sum"
+        )
+        assert result.shape == (x.shape[0], x.shape[1], config.d_model)
+        return result
+
+
+class TransformerBlock(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer_norm_attn = LayerNorm()
+        self.attn_block = Attention()
+        self.layer_norm_mlp = LayerNorm()
+        self.mlp = MLP()
+
+    def forward(
+        self, x: Float[Tensor, "seq residue d_model"]
+    ) -> Float[Tensor, "seq residue d_model"]:
+        # self attention
+        x_attn = self.attn_block(x)
+        # residual connection
+        x = x + x_attn
+        x = self.layer_norm_attn(x)
+        # mlp
+        x_mlp = self.mlp(x)
+        # residual connection
+        x = x + x_mlp
+        x = self.layer_norm_mlp(x)
+        return x
+
+
+class Transformer(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.blocks = nn.ModuleList(
+            [TransformerBlock() for _ in range(config.n_layers)]
+        )
+
+    def forward(
+        self, x: Float[Tensor, "seq residue d_model"]
+    ) -> Float[Tensor, "seq residue d_model"]:
+        for block in self.blocks:
+            x = block(x)
+        return x
 
 
 class DQN(nn.Module):
     def __init__(self):
         super().__init__()
-
-        self.hidden_size = 256
-        self.n_hidden = 5
-
-        layers = []
-
-        # Input layer
-        layers.extend(
-            [
-                nn.Linear(config.state_dim, self.hidden_size),
-                nn.LayerNorm(self.hidden_size),
-                nn.ReLU(),
-            ]
+        self.embed = Embedding()
+        self.transformer = Transformer()
+        self.W_act = nn.Parameter(
+            nn.init.kaiming_uniform_(
+                torch.empty(config.d_model, config.action_dim, dtype=torch.float).T
+            ).T
         )
+        self.b_act = nn.Parameter(torch.zeros(config.action_dim, dtype=torch.float))
 
-        # Hidden layers
-        for _ in range(self.n_hidden - 1):
-            layers.extend(
-                [
-                    nn.Linear(self.hidden_size, self.hidden_size),
-                    nn.LayerNorm(self.hidden_size),
-                    nn.ReLU(),
-                ]
+    def forward(
+        self, states: Int[Tensor, "batch state_dim"]
+    ) -> Float[Tensor, "batch action_dim"]:
+        embeds = self.embed(states)  # batch seq_len d_model
+        transformed = self.transformer(embeds)  # batch seq_len d_model
+        result = (
+            einsum(
+                transformed,
+                self.W_act,
+                "batch seq_len d_model, d_model action_dim -> batch action_dim",
             )
-
-        # Output layer (no normalization needed for output)
-        layers.append(nn.Linear(self.hidden_size, config.action_dim))
-
-        self.model = nn.Sequential(*layers)
-
-        self._init_weights()
-
-    def _init_weights(self):
-        for m in self.model:
-            if isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
-
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0.01)
-
-    def forward(self, x):
-        return self.model(x)
+            + self.b_act
+        )
+        assert result.shape == (states.shape[0], config.action_dim)
+        return result
 
 
 def validate_actions(actions: Bool[Tensor, "batch action_dim"]):
@@ -260,3 +522,6 @@ class Agent(torch.nn.Module):
         self.target_net.load_state_dict(target_state)
         self.optimizer.load_state_dict(optimizer_state)
         self.steps_done = other.steps_done
+
+    def get_n_params(self):
+        return sum(p.numel() for p in self.policy_net.parameters())

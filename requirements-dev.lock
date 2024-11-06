@@ -35,6 +35,8 @@ decorator==5.1.1
     # via ipython
 docker-pycreds==0.4.0
     # via wandb
+einops==0.8.0
+    # via qres
 executing==2.1.0
     # via stack-data
 filelock==3.16.1
@@ -57,6 +59,8 @@ huggingface-hub==0.26.1
     # via transformers
 idna==3.10
     # via requests
+iniconfig==2.0.0
+    # via pytest
 ipykernel==6.29.5
 ipython==8.29.0
     # via ipykernel
@@ -130,6 +134,7 @@ packaging==24.1
     # via huggingface-hub
     # via ipykernel
     # via matplotlib
+    # via pytest
     # via transformers
 pandas==2.2.3
     # via seaborn
@@ -142,6 +147,8 @@ pillow==11.0.0
 platformdirs==4.3.6
     # via jupyter-core
     # via wandb
+pluggy==1.5.0
+    # via pytest
 prompt-toolkit==3.0.48
     # via ipython
 protobuf==5.28.3
@@ -158,6 +165,8 @@ pygments==2.18.0
     # via ipython
 pyparsing==3.2.0
     # via matplotlib
+pytest==8.3.3
+    # via qres
 python-dateutil==2.9.0.post0
     # via jupyter-client
     # via matplotlib

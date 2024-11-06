@@ -17,6 +17,8 @@ dependencies = [
     "jaxtyping>=0.2.34",
     "wandb>=0.18.5",
     "accelerate>=1.0.1",
+    "einops>=0.8.0",
+    "pytest>=8.3.3",
 ]
 
 [tool.rye]

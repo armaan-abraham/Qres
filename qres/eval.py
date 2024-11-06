@@ -4,7 +4,7 @@ import torch
 
 from qres.agent import Agent
 from qres.config import config
-from qres.environment import Environment
+from qres.environment import Environment, parse_seqs_from_states
 
 
 def main():
@@ -63,9 +63,7 @@ def main():
         rewards.append(reward.tolist())  # Convert tensor to list for multiple rewards
 
         # Decode sequences from states
-        _, seqs = env.parse_seqs_from_states(
-            states
-        )  # seqs: (batch_size, sequence_length)
+        _, seqs = parse_seqs_from_states(states)  # seqs: (batch_size, seq_len)
         seq_strings = [env.decode_seq(seq) for seq in seqs]  # Decode each sequence
         sequences.append(seq_strings)
 
