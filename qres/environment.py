@@ -28,18 +28,15 @@ def validate_states(states: torch.Tensor):
 
 
 class Environment:
-    def __init__(self, device: str):
+    def __init__(self, device: str, batch_size: int | None = None):
         self.device = device
         self.structure_predictor = StructurePredictor(device=device)
+        self.batch_size = batch_size or config.structure_predictor_batch_size
 
-        self.states = torch.stack(
-            [self._init_state() for _ in range(config.structure_predictor_batch_size)]
-        )
+        self.states = torch.stack([self._init_state() for _ in range(self.batch_size)])
         validate_states(self.states)
 
-        self.steps_done = torch.zeros(
-            config.structure_predictor_batch_size, device=self.device
-        )
+        self.steps_done = torch.zeros(self.batch_size, device=self.device)
 
     def _init_state(self) -> torch.Tensor:
         # Generate a random initial sequence of amino acid indices
@@ -91,7 +88,7 @@ class Environment:
         self.steps_done += 1
         self.steps_done[dones] = 0
 
-        for i in range(config.structure_predictor_batch_size):
+        for i in range(self.batch_size):
             if dones[i]:
                 self.states[i] = self._init_state()
             else:
@@ -106,9 +103,7 @@ class Environment:
         seqs: torch.Tensor,
         actions: Bool[torch.Tensor, "batch (residue amino_acid)"],
     ) -> torch.Tensor:
-        actions = actions.view(
-            config.structure_predictor_batch_size, config.sequence_length, N_AMINO_ACIDS
-        )
+        actions = actions.view(self.batch_size, config.sequence_length, N_AMINO_ACIDS)
         next_seqs = seqs.clone()
 
         # Find the residue where the action is 1 and replace the corresponding
@@ -131,9 +126,7 @@ class Environment:
         seqs_str = [self.decode_seq(seq) for seq in seqs]
 
         if config.fake_structure_prediction:
-            confidences = torch.rand(
-                config.structure_predictor_batch_size, device=self.device
-            )
+            confidences = torch.rand(self.batch_size, device=self.device)
         else:
             pdbs = self.structure_predictor.predict_structure(seqs_str)
             confidences = torch.tensor(

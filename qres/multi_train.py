@@ -1,48 +1,18 @@
+import logging
+import traceback
 from enum import Enum
 from pathlib import Path
 
 import torch
-import traceback
 import torch.multiprocessing as mp
 
+import wandb
 from qres.agent import Agent
 from qres.buffer import Buffer
 from qres.config import config
 from qres.environment import Environment
-from qres.logger import logger
 
-"""
-TODO: add logging
-
-tasks:
-1. choose actions / predict structure
-    - holds individual environment instance
-2. train agent
-
-task queue:
-1. inputs: agent
-    - choose actions based on current states
-    - predict structure
-    - produce experiences
-2. inputs: agent
-    - add condition: certain number of prediction tasks have been completed
-    since last train task
-
-result queue:
-1. outputs: experiences
-    - add experiences to buffer
-2. outputs: agent
-    - update agent
-
-multi buffer:
-- buffer in shared memory, passed to each worker on worker init
-- when worker gets structure prediction task, it moves the agent to the local
-device, and then adds to the buffer while holding the lock
-- when worker gets train task, it moves the agent and buffer to local device,
-trains agent, and then copies agent back to global memory
-"""
-
-
+logger = logging.getLogger()
 
 
 class TaskType(Enum):
@@ -72,7 +42,6 @@ def worker(
         while True:
             task = tasks.get()
 
-
             if task is None:
                 break
 
@@ -80,8 +49,6 @@ def worker(
             agent = task["agent"]
 
             if task_type == TaskType.PREDICT_STRUCTURE:
-                raise BaseException("ye")
-
                 states = env.get_states()
 
                 assert agent.device == "cpu"
@@ -91,7 +58,6 @@ def worker(
                 with torch.no_grad():
                     actions = agent.select_actions(states)
                     next_states, rewards = env.step(states, actions)
-
 
                 # Add experiences to buffer
                 with buffer_lock:
@@ -111,8 +77,10 @@ def worker(
                             "distance_penalty": env.last_distance_penalty,
                             "device_id": device_id,
                             "task_id": task["task_id"],
-                            "gpu_memory_allocated": torch.cuda.memory_allocated(device) / 1e9,
-                            "gpu_memory_reserved": torch.cuda.memory_reserved(device) / 1e9,
+                            "gpu_memory_allocated": torch.cuda.memory_allocated(device)
+                            / 1e9,
+                            "gpu_memory_reserved": torch.cuda.memory_reserved(device)
+                            / 1e9,
                         },
                     )
                 )
@@ -129,23 +97,27 @@ def worker(
                 agent = agent.to(device)
 
                 with buffer_lock:
-
                     assert buffer.device == "cpu"
                     buffer_local = buffer.to(device)
                     assert buffer.device == "cpu"
                     assert buffer_local.device == device
 
-                agent.train(buffer_local)
+                avg_loss, avg_reward, avg_state_action_value = agent.train(buffer_local)
 
                 results.put(
                     (
                         TaskType.TRAIN_AGENT,
                         {
+                            "avg_loss": avg_loss,
+                            "avg_reward": avg_reward,
+                            "avg_state_action_value": avg_state_action_value,
                             "agent": agent.to("cpu"),
                             "device_id": device_id,
                             "task_id": task["task_id"],
-                            "gpu_memory_allocated": torch.cuda.memory_allocated(device) / 1e9,
-                            "gpu_memory_reserved": torch.cuda.memory_reserved(device) / 1e9,
+                            "gpu_memory_allocated": torch.cuda.memory_allocated(device)
+                            / 1e9,
+                            "gpu_memory_reserved": torch.cuda.memory_reserved(device)
+                            / 1e9,
                         },
                     )
                 )
@@ -153,15 +125,21 @@ def worker(
             else:
                 raise ValueError(f"Unknown task type: {task_type}")
             torch.cuda.empty_cache()
-    except Exception as e:
-        # results.put((TaskType.ERROR, {}))
-        error_msg = traceback.format_exc()
-        results.put((TaskType.ERROR, {"error": error_msg}))
+    except BaseException as e:
+        msg = "Could not format error"
+        try:
+            msg = traceback.format_exc()
+        except:
+            try:
+                msg = str(e)
+            except:
+                pass
+        results.put((TaskType.ERROR, {"error": msg}))
         raise
 
 
 class MultiTrainer:
-    def __init__(self, save_dir: Path = None):
+    def __init__(self, save_dir: Path):
         self.save_dir = save_dir
         self.device_ids = list(range(torch.cuda.device_count()))
         self.num_workers = len(self.device_ids)
@@ -180,7 +158,7 @@ class MultiTrainer:
 
         workers = []
         for i in range(self.num_workers):
-            logger.log_str(f"Starting worker {i}")
+            logger.info({"Msg": f"Starting worker {i}"})
             p = mp.Process(
                 target=worker,
                 args=(
@@ -194,7 +172,6 @@ class MultiTrainer:
             p.start()
             workers.append(p)
 
-
         try:
             tasks_since_last_train = 0
             # We only want one training task to be in progress at a time
@@ -203,9 +180,7 @@ class MultiTrainer:
             task_id = 0
             epoch = 0
             while epoch < config.n_epochs:
-                assert (
-                    n_active_workers <= self.num_workers and n_active_workers >= 0
-                )
+                assert n_active_workers <= self.num_workers and n_active_workers >= 0
                 assert (
                     tasks_since_last_train >= 0
                     # and tasks_since_last_train <= config.train_interval
@@ -217,10 +192,12 @@ class MultiTrainer:
                     and prev_train_completed
                     and self.buffer.get_size() >= config.train_batch_size
                 ):
-                    logger.log(
-                        Msg="Task created",
-                        TaskType="Train",
-                        TaskID=task_id,
+                    logger.info(
+                        {
+                            "Msg": "Task created",
+                            "TaskType": "Train",
+                            "TaskID": task_id,
+                        }
                     )
                     tasks.put(
                         (
@@ -234,10 +211,12 @@ class MultiTrainer:
                     prev_train_completed = False
                     tasks_since_last_train = 0
                 else:
-                    logger.log(
-                        Msg="Task created",
-                        TaskType="Structure",
-                        TaskID=task_id,
+                    logger.info(
+                        {
+                            "Msg": "Task created",
+                            "TaskType": "Structure",
+                            "TaskID": task_id,
+                        }
                     )
                     tasks.put(
                         (
@@ -245,7 +224,6 @@ class MultiTrainer:
                                 "type": TaskType.PREDICT_STRUCTURE,
                                 "agent": self.agent,
                                 "task_id": task_id,
-
                             }
                         )
                     )
@@ -256,33 +234,47 @@ class MultiTrainer:
 
                 if n_active_workers == self.num_workers:
                     # Take result from queue
-                    logger.log_str("Waiting for result from queue")
+                    logger.info({"Msg": "Waiting for result from queue"})
                     task_type, result = results.get()
 
                     if task_type == TaskType.ERROR:
                         # try to get the next result with message
-                        # logger.log(Msg="Error in subprocess")
-                        # task_type, result = results.get()
-                        logger.log(Error=result["error"])
+                        logger.error({"Msg": "Error in subprocess"})
+                        task_type, result = results.get()
+                        logger.error({"Error": result["error"]})
                         raise Exception(result["error"])
 
                     elif task_type == TaskType.TRAIN_AGENT:
-                        assert result["agent"].device == "cpu", result[
-                            "agent"
-                        ].device
+                        assert result["agent"].device == "cpu", result["agent"].device
                         self.agent.copy_(result["agent"])
                         epoch += 1
                         prev_train_completed = True
 
-                        logger.log(
-                            Msg="Task completed",
-                            TaskType="Train",
-                            Epoch=epoch,
-                            DeviceID=result["device_id"],
-                            TaskID=result["task_id"],
-                            GpuMemoryAllocated=result["gpu_memory_allocated"],
-                            GpuMemoryReserved=result["gpu_memory_reserved"],
+                        logger.info(
+                            {
+                                "Msg": "Task completed",
+                                "TaskType": "Train",
+                                "Epoch": epoch,
+                                "DeviceID": result["device_id"],
+                                "TaskID": result["task_id"],
+                                "GpuMemoryAllocated": result["gpu_memory_allocated"],
+                                "GpuMemoryReserved": result["gpu_memory_reserved"],
+                                "AvgLoss": result["avg_loss"],
+                                "AvgReward": result["avg_reward"],
+                                "AvgStateActionValue": result["avg_state_action_value"],
+                            }
                         )
+
+                        if config.wandb_enabled:
+                            wandb.log(
+                                {
+                                    "avg_loss": result["avg_loss"],
+                                    "avg_reward": result["avg_reward"],
+                                    "avg_state_action_value": result[
+                                        "avg_state_action_value"
+                                    ],
+                                }
+                            )
 
                         if (
                             config.save_enabled
@@ -291,35 +283,61 @@ class MultiTrainer:
                             self.save(epoch)
 
                     elif task_type == TaskType.PREDICT_STRUCTURE:
-                        logger.log(
-                            Msg="Task completed",
-                            TaskType="Structure",
-                            TaskID=result["task_id"],
-                            DeviceID=result["device_id"],
-                            BufferSize=self.buffer.get_size(),
-                            Reward=result["reward"],
-                            Confidence=result["confidence"],
-                            DistancePenalty=result["distance_penalty"],
-                            GpuMemoryAllocated=result["gpu_memory_allocated"],
-                            GpuMemoryReserved=result["gpu_memory_reserved"],
+                        logger.info(
+                            {
+                                "Msg": "Task completed",
+                                "TaskType": "Structure",
+                                "TaskID": result["task_id"],
+                                "DeviceID": result["device_id"],
+                                "BufferSize": self.buffer.get_size(),
+                                "Reward": result["reward"],
+                                "Confidence": result["confidence"],
+                                "DistancePenalty": result["distance_penalty"],
+                                "GpuMemoryAllocated": result["gpu_memory_allocated"],
+                                "GpuMemoryReserved": result["gpu_memory_reserved"],
+                            }
                         )
+
+                        if config.wandb_enabled:
+                            wandb.log(
+                                {
+                                    "reward": result["reward"],
+                                    "confidence": result["confidence"],
+                                    "distance_penalty": result["distance_penalty"],
+                                    "gpu_memory_allocated": result[
+                                        "gpu_memory_allocated"
+                                    ],
+                                    "gpu_memory_reserved": result[
+                                        "gpu_memory_reserved"
+                                    ],
+                                    "task_id": result["task_id"],
+                                    "device_id": result["device_id"],
+                                    "buffer_size": self.buffer.get_size(),
+                                }
+                            )
 
                     n_active_workers -= 1
 
                 # Print GPU memory usage for each device
                 for device_id in self.device_ids:
-                    allocated = torch.cuda.memory_allocated(device_id) / 1e9  # Convert to GB
-                    reserved = torch.cuda.memory_reserved(device_id) / 1e9    # Convert to GB
-                    logger.log(
-                        Msg="GPU Memory Usage",
-                        DeviceID=device_id,
-                        AllocatedGB=allocated,
-                        ReservedGB=reserved
+                    allocated = (
+                        torch.cuda.memory_allocated(device_id) / 1e9
+                    )  # Convert to GB
+                    reserved = (
+                        torch.cuda.memory_reserved(device_id) / 1e9
+                    )  # Convert to GB
+                    logger.info(
+                        {
+                            "Msg": "GPU Memory Usage",
+                            "DeviceID": device_id,
+                            "AllocatedGB": allocated,
+                            "ReservedGB": reserved,
+                        }
                     )
-        # except BaseException as e:
-        #     logger.log(Msg="Error in main process")
-        #     logger.log(Error=e)
-        #     raise e
+        except BaseException as e:
+            logger.error({"Msg": "Error in main process"})
+            logger.error({"Error": e})
+            raise e
         finally:
             for _ in workers:
                 tasks.put(None)
@@ -329,10 +347,12 @@ class MultiTrainer:
     def save(self, n_epochs: int | None = None):
         if n_epochs is None:
             n_epochs = "final"
-        logger.log(
-            Msg="Saving model and buffer",
-            Epoch=n_epochs,
-            SaveDir=self.save_dir,
+        logger.info(
+            {
+                "Msg": "Saving model and buffer",
+                "Epoch": n_epochs,
+                "SaveDir": self.save_dir,
+            }
         )
         self.agent.save_model(self.save_dir / f"model_{n_epochs}.pt")
         self.buffer.save(self.save_dir / f"buffer_{n_epochs}.pth")

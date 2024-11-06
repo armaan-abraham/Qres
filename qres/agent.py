@@ -17,12 +17,41 @@ class DQN(nn.Module):
         self.hidden_size = 256
         self.n_hidden = 5
 
-        layers = [nn.Linear(config.state_dim, self.hidden_size), nn.ReLU()]
+        layers = []
+
+        # Input layer
+        layers.extend(
+            [
+                nn.Linear(config.state_dim, self.hidden_size),
+                nn.LayerNorm(self.hidden_size),
+                nn.ReLU(),
+            ]
+        )
+
+        # Hidden layers
         for _ in range(self.n_hidden - 1):
-            layers.extend([nn.Linear(self.hidden_size, self.hidden_size), nn.ReLU()])
+            layers.extend(
+                [
+                    nn.Linear(self.hidden_size, self.hidden_size),
+                    nn.LayerNorm(self.hidden_size),
+                    nn.ReLU(),
+                ]
+            )
+
+        # Output layer (no normalization needed for output)
         layers.append(nn.Linear(self.hidden_size, config.action_dim))
 
         self.model = nn.Sequential(*layers)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.model:
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
+
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.01)
 
     def forward(self, x):
         return self.model(x)
@@ -45,7 +74,10 @@ class Agent(torch.nn.Module):
         self.policy_net = DQN().to(device)
         self.target_net = DQN().to(device)
         self.optimizer = optim.AdamW(
-            self.policy_net.parameters(), lr=config.lr, amsgrad=True
+            self.policy_net.parameters(),
+            lr=config.lr,
+            weight_decay=config.l2_weight_decay,
+            amsgrad=True,
         )
 
         self.epsilon_start = config.epsilon_start
@@ -64,7 +96,7 @@ class Agent(torch.nn.Module):
         )
 
     def select_actions(
-        self, states: Bool[Tensor, "batch state_dim"]
+        self, states: Bool[Tensor, "batch state_dim"], greedy: bool = False
     ) -> Bool[Tensor, "batch action_dim"]:
         if states.dtype != torch.float:
             states = states.to(dtype=torch.float)
@@ -77,7 +109,11 @@ class Agent(torch.nn.Module):
             device=self.device,
             dtype=torch.bool,
         )
-        greedy_mask = sample > eps_threshold
+        greedy_mask = (
+            sample > eps_threshold
+            if not greedy
+            else torch.ones_like(sample, dtype=torch.bool)
+        )
 
         # Get actions for greedy choices
         if greedy_mask.any():
@@ -155,16 +191,18 @@ class Agent(torch.nn.Module):
 
         self.steps_done += 1
 
-        return loss.item()
+        return loss.item(), state_action_values.mean().item()
 
     def train(self, buffer: Buffer):
-        """Train for specified number of iterations, then update target network"""
+        """Train for specified number of iterations, updating target network periodically"""
         assert (
             buffer.size >= config.train_batch_size
         ), f"Buffer has only {buffer.size} samples, but {config.train_batch_size} are required"
         total_loss = 0
+        total_reward = 0
+        total_state_action_values_mean = 0
 
-        for _ in range(config.train_iter):
+        for step in range(config.train_iter):
             states, actions, next_states, rewards = buffer.sample(
                 config.train_batch_size
             )
@@ -175,14 +213,20 @@ class Agent(torch.nn.Module):
             states = states.to(dtype=torch.float)
             next_states = next_states.to(dtype=torch.float)
 
-            loss = self.train_step(states, actions, next_states, rewards)
+            loss, state_action_value = self.train_step(
+                states, actions, next_states, rewards
+            )
             total_loss += loss
+            total_reward += torch.mean(rewards).item()
+            total_state_action_value += state_action_value
+            # Only update target network periodically
+            if (step + 1) % config.update_target_every == 0:
+                self.update_target_net()
 
-        # Update target network after all iterations
-        self.update_target_net()
         loss_avg = total_loss / config.train_iter
-        return loss_avg
-
+        reward_avg = total_reward / config.train_iter
+        state_action_value_avg = total_state_action_value / config.train_iter
+        return loss_avg, reward_avg, state_action_value_avg
 
     def to(self, device: str):
         inst = self.clone()

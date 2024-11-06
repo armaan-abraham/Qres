@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+from multiprocessing import Manager
 from pathlib import Path
+from typing import Optional
 
 import torch
 import yaml
@@ -7,18 +9,34 @@ import yaml
 AMINO_ACIDS = list("ACDEFGHIKLMNPQRSTVWY")
 N_AMINO_ACIDS = len(AMINO_ACIDS)
 
+save_dir = Path(__file__).parent / "data"
+save_dir.mkdir(parents=True, exist_ok=True)
+
+
+def get_curr_run_iter():
+    iterations = [int(f.stem.split("_")[-1]) for f in save_dir.glob("*/")]
+    return max(iterations, default=0) + 1
+
+
+def get_curr_save_dir():
+    curr_save_dir = save_dir / f"run_{get_curr_run_iter()}"
+    if not curr_save_dir.exists():
+        curr_save_dir.mkdir(parents=True, exist_ok=True)
+    return curr_save_dir
+
 
 @dataclass
 class Config:
     sequence_length: int = 30
+    distance_penalty_coeff: float = 5e-4
 
     structure_predictor_batch_size: int = int(500)
 
-    max_buffer_size: int = int(1e7)
+    max_buffer_size: int = int(5e6)
     n_epochs: int = int(1e3)
 
-    train_iter: int = int(100)
-    train_batch_size: int = int(2000)
+    train_iter: int = int(300)
+    train_batch_size: int = int(5000)
 
     @property
     def train_interval(self):
@@ -28,17 +46,16 @@ class Config:
     epsilon_start: float = 0.9
     epsilon_end: float = 0.05
     epsilon_decay: int = 1000
-    tau: float = 0.005
-    lr: float = 1e-3
-    distance_penalty_coeff: float = 1e-2
+    tau: float = 0.1
+    update_target_every: int = 10
+    lr: float = 3e-4
+    l2_weight_decay: float = 1e-4
 
-    save_interval: int = 50
+    save_interval: int = 100
 
     max_episode_length: int = 50
 
-    project_name: str = "qres_stability"
-    run_name: str = "4H"
-    wandb_enabled: bool = False
+    wandb_enabled: bool = True
     fake_structure_prediction: bool = False
     save_enabled: bool = True
 
