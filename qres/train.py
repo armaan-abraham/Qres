@@ -24,6 +24,8 @@ if __name__ == "__main__":
 
     setup_logging(save_dir)
 
+    logger.info(f"Config: {config}")
+
     try:
         trainer = MultiTrainer(save_dir)
         trainer.run()

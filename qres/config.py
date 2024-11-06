@@ -32,14 +32,16 @@ class Config:
     distance_penalty_coeff: float = 5e-4
 
     # training scale/duration
-    max_buffer_size: int = int(1e4)
-    n_epochs: int = int(1e3)
-    train_iter: int = int(50)
+    n_epochs: int = int(5e3)
+    train_iter: int = int(300)
     max_episode_length: int = 50
 
     # batch size
-    structure_predictor_batch_size: int = int(100)
-    train_batch_size: int = int(100)
+    structure_predictor_batch_size: int = int(500)
+    train_batch_size: int = int(5e3)
+    @property
+    def max_buffer_size(self):
+        return self.n_epochs * self.train_batch_size
 
     @property
     def train_interval(self):
@@ -108,6 +110,17 @@ class Config:
             config_dict["state_dtype"] = getattr(torch, dtype_str.split(".")[-1])
 
         return cls(**config_dict)
+
+    def __str__(self):
+        # Get regular attributes
+        attrs = {k: v for k, v in vars(self).items() if not k.startswith("__")}
+        
+        # Add properties
+        for name in dir(self.__class__):
+            if isinstance(getattr(self.__class__, name), property):
+                attrs[name] = getattr(self, name)
+                
+        return "\n".join([f"{k}: {v}" for k, v in attrs.items()])
 
 
 config = Config()
