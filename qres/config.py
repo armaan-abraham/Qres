@@ -14,12 +14,13 @@ save_dir = Path(__file__).parent / "data"
 save_dir.mkdir(parents=True, exist_ok=True)
 
 
-def get_curr_run_iter():
+def generate_run_id():
     return petname.generate(words=3, separator="-")
 
 
-def get_curr_save_dir():
-    curr_save_dir = save_dir / f"run_{get_curr_run_iter()}"
+def get_curr_save_dir(run_id: str):
+    """Should only be called once!"""
+    curr_save_dir = save_dir / f"run_{run_id}"
     if not curr_save_dir.exists():
         curr_save_dir.mkdir(parents=True, exist_ok=True)
     return curr_save_dir

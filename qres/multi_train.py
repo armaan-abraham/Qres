@@ -319,22 +319,6 @@ class MultiTrainer:
 
                     n_active_workers -= 1
 
-                # Print GPU memory usage for each device
-                for device_id in self.device_ids:
-                    allocated = (
-                        torch.cuda.memory_allocated(device_id) / 1e9
-                    )  # Convert to GB
-                    reserved = (
-                        torch.cuda.memory_reserved(device_id) / 1e9
-                    )  # Convert to GB
-                    logger.info(
-                        {
-                            "Msg": "GPU Memory Usage",
-                            "DeviceID": device_id,
-                            "AllocatedGB": allocated,
-                            "ReservedGB": reserved,
-                        }
-                    )
         except BaseException as e:
             logger.error({"Msg": "Error in main process"})
             logger.error({"Error": e})
