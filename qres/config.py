@@ -59,6 +59,10 @@ class Config:
     def train_interval(self):
         return self.train_batch_size / self.structure_predictor_batch_size
 
+    @property
+    def eval_interval(self):
+        return self.epochs_per_eval * self.train_interval
+
     # save
     save_interval: int = 100
     save_enabled: bool = True
