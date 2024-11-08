@@ -1,4 +1,5 @@
 import logging
+import os
 import traceback
 from enum import Enum
 from pathlib import Path
@@ -463,7 +464,6 @@ class MultiTrainer:
             raise e
         # move temp file to final file
         os.rename(self.save_dir / f"buffer_temp.pth", self.save_dir / f"buffer.pth")
-        
 
         # test model save
         agent_test = Agent.load_model(self.save_dir / f"model_{n_epochs}.pt", "cpu")

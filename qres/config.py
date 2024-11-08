@@ -50,10 +50,7 @@ class Config:
 
     @property
     def max_buffer_size(self):
-        return int(
-            self.total_train_samples
-            * self.buffer_size_rel_to_total_experience
-        )
+        return int(self.total_train_samples * self.buffer_size_rel_to_total_experience)
 
     @property
     def train_interval(self):
@@ -84,7 +81,6 @@ class Config:
     n_heads: int = 4
     n_layers: int = 2
     layer_norm_eps: float = 1e-5
-
 
     fake_structure_prediction: bool = False
 

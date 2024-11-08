@@ -353,7 +353,7 @@ class Agent(torch.nn.Module):
         # Initialize target network weights
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
-    
+
     def get_steps_done(self):
         return self.steps_done.item()
 
@@ -429,11 +429,11 @@ class Agent(torch.nn.Module):
             },
             path,
         )
-    
+
     def __eq__(self, other):
         if not isinstance(other, Agent):
             return False
-        
+
         # Compare network architectures and parameters
         if not all(
             torch.equal(p1, p2)
@@ -442,7 +442,7 @@ class Agent(torch.nn.Module):
             )
         ):
             return False
-            
+
         if not all(
             torch.equal(p1, p2)
             for p1, p2 in zip(
@@ -450,13 +450,13 @@ class Agent(torch.nn.Module):
             )
         ):
             return False
-            
+
         # we're neglecting the optimizer
-            
+
         # Compare steps done
         if not torch.equal(self.steps_done, other.steps_done):
             return False
-            
+
         return True
 
     @classmethod
