@@ -11,7 +11,7 @@ from qres.environment import Environment, parse_seqs_from_states
 def main():
     # Specify model path
     model_path = (
-        Path(__file__).parent / "data" / "run_truly-picked-snipe" / "model_3499.pt"
+        "/root/Qres/qres/data/run_overly-keen-whale/model_9999.pt"
     )
 
     # Device configuration
@@ -19,50 +19,15 @@ def main():
     print(f"Using device: {device}")
 
     # Initialize agent
-    agent = Agent(device=device)
-
-    checkpoint = torch.load(model_path, map_location=device)
-
-    # Verify all parameters are present in state dicts
-    policy_missing = set(agent.policy_net.state_dict().keys()) - set(
-        checkpoint["policy_net_state_dict"].keys()
-    )
-    target_missing = set(agent.target_net.state_dict().keys()) - set(
-        checkpoint["target_net_state_dict"].keys()
-    )
-    if policy_missing or target_missing:
-        raise ValueError(
-            f"Missing parameters in checkpoint: Policy net: {policy_missing}, Target net: {target_missing}"
-        )
-
-    agent.policy_net.load_state_dict(
-        checkpoint["policy_net_state_dict"], strict=True, assign=True
-    )
-    agent.target_net.load_state_dict(
-        checkpoint["target_net_state_dict"], strict=True, assign=True
-    )
-    agent.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    # agent.steps_done = checkpoint.get("steps_done", 0)
-    agent = agent.to(device)
-    # print(f"steps_done: {agent.steps_done}")
-
-    # Ensure the optimizer's state is on the correct device
-    for state in agent.optimizer.state.values():
-        for k, v in state.items():
-            if isinstance(v, torch.Tensor):
-                state[k] = v.to(device)
-
-    # Set the agent to evaluation mode
-    agent.policy_net.eval()
-    agent.target_net.eval()
-    agent.steps_done = 500000
+    agent = Agent.load_model(model_path, device=device)
+    print(f"Steps done: {agent.get_steps_done()}")
 
     # Initialize environment with multiple states
-    batch_size = 500
+    batch_size = 50
     env = Environment(device=device, batch_size=batch_size)
 
     # Number of steps to run
-    num_steps = 50
+    num_steps = 20
 
     rewards = []
     sequences = []

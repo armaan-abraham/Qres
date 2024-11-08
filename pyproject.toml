@@ -20,6 +20,9 @@ dependencies = [
     "einops>=0.8.0",
     "pytest>=8.3.3",
     "petname>=2.6",
+    "nglview>=3.1.2",
+    "ipykernel>=6.29.5",
+    "py3dmol>=2.4.2",
 ]
 
 [tool.rye]
