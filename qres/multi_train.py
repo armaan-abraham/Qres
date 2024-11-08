@@ -179,10 +179,12 @@ def worker(
     except BaseException as e:
         msg = "Could not format error"
         try:
-            msg = traceback.format_exc()
+            exc = traceback.format_exc()
+            msg = exc
         except:
             try:
-                msg = str(e)
+                exc = str(e)
+                msg = exc
             except:
                 pass
         results.put((TaskType.ERROR, {"error": msg}))
