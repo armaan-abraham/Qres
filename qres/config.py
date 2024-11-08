@@ -33,10 +33,10 @@ class Config:
     distance_penalty_coeff: float = 5e-4
 
     # training scale/duration
-    n_epochs: int = int(5e4)
+    n_epochs: int = int(1e4)
     train_iter: int = int(150)
     max_episode_length: int = 20
-    buffer_size_rel_to_total_experience: float = 0.5
+    buffer_size_rel_to_total_experience: float = 0.2
     epochs_per_eval: int = 20
 
     # batch size
