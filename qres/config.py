@@ -29,32 +29,41 @@ def get_curr_save_dir(run_id: str):
 @dataclass
 class Config:
     # training objective
-    seq_len: int = 10
+    seq_len: int = 20
     distance_penalty_coeff: float = 5e-4
 
     # training scale/duration
-    n_epochs: int = int(20)
-    train_iter: int = int(1)
-    max_episode_length: int = 2
-    buffer_size_rel_to_total_experience: float = 1 / 3
-    eval_interval: int = int(2)
+    n_epochs: int = int(5e4)
+    train_iter: int = int(150)
+    max_episode_length: int = 20
+    buffer_size_rel_to_total_experience: float = 0.5
+    epochs_per_eval: int = 20
 
     # batch size
-    structure_predictor_batch_size: int = int(2)
-    train_batch_size: int = int(2)
-    eval_batch_size: int = int(2)
+    structure_predictor_batch_size: int = int(500)
+    train_batch_size: int = int(2500)
+    eval_batch_size: int = int(50)
+
+    @property
+    def total_train_samples(self):
+        return self.n_epochs * self.train_batch_size
 
     @property
     def max_buffer_size(self):
         return int(
-            self.n_epochs
-            * self.train_batch_size
+            self.total_train_samples
             * self.buffer_size_rel_to_total_experience
         )
 
     @property
     def train_interval(self):
         return self.train_batch_size / self.structure_predictor_batch_size
+
+    # save
+    save_interval: int = 100
+    save_enabled: bool = True
+
+    wandb_enabled: bool = True
 
     # DQN
     gamma: float = 0.99
@@ -72,11 +81,6 @@ class Config:
     n_layers: int = 2
     layer_norm_eps: float = 1e-5
 
-    # save
-    save_interval: int = 100
-    save_enabled: bool = True
-
-    wandb_enabled: bool = True
 
     fake_structure_prediction: bool = False
 
@@ -86,7 +90,6 @@ class Config:
 
     @property
     def state_dim(self):
-        # Updated state dimension to account for indices instead of one-hot encoding
         return 2 * self.seq_len
 
     @property

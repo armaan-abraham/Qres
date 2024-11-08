@@ -353,10 +353,16 @@ class Agent(torch.nn.Module):
         # Initialize target network weights
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
+    
+    def get_steps_done(self):
+        return self.steps_done.item()
+
+    def set_steps_done(self, value: int):
+        self.steps_done = torch.tensor(value, device=self.device)
 
     def get_epsilon(self) -> float:
         return self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(
-            -1.0 * self.steps_done.item() / self.epsilon_decay
+            -1.0 * self.get_steps_done() / self.epsilon_decay
         )
 
     def select_actions(
@@ -423,6 +429,45 @@ class Agent(torch.nn.Module):
             },
             path,
         )
+    
+    def __eq__(self, other):
+        if not isinstance(other, Agent):
+            return False
+        
+        # Compare network architectures and parameters
+        if not all(
+            torch.equal(p1, p2)
+            for p1, p2 in zip(
+                self.policy_net.parameters(), other.policy_net.parameters()
+            )
+        ):
+            return False
+            
+        if not all(
+            torch.equal(p1, p2)
+            for p1, p2 in zip(
+                self.target_net.parameters(), other.target_net.parameters()
+            )
+        ):
+            return False
+            
+        # we're neglecting the optimizer
+            
+        # Compare steps done
+        if not torch.equal(self.steps_done, other.steps_done):
+            return False
+            
+        return True
+
+    @classmethod
+    def load_model(cls, path, device: str):
+        checkpoint = torch.load(path, map_location=device)
+        agent = cls(device=device)
+        agent.policy_net.load_state_dict(checkpoint["policy_net_state_dict"])
+        agent.target_net.load_state_dict(checkpoint["target_net_state_dict"])
+        agent.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        agent.steps_done = checkpoint["steps_done"]
+        return agent
 
     def train_step(
         self,
@@ -524,7 +569,7 @@ class Agent(torch.nn.Module):
         self.policy_net.load_state_dict(policy_state)
         self.target_net.load_state_dict(target_state)
         self.optimizer.load_state_dict(optimizer_state)
-        self.steps_done.copy_(other.steps_done)
+        self.set_steps_done(other.get_steps_done())
 
     def get_n_params(self):
         return sum(p.numel() for p in self.policy_net.parameters())

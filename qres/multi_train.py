@@ -176,6 +176,7 @@ def worker(
             else:
                 raise ValueError(f"Unknown task type: {task_type}")
             torch.cuda.empty_cache()
+
     except BaseException as e:
         msg = "Could not format error"
         try:
@@ -436,6 +437,7 @@ class MultiTrainer:
             logger.error({"Msg": "Error in main process"})
             logger.error({"Error": e})
             raise e
+
         finally:
             for _ in workers:
                 tasks.put(None)
@@ -453,4 +455,16 @@ class MultiTrainer:
             }
         )
         self.agent.save_model(self.save_dir / f"model_{n_epochs}.pt")
-        self.buffer.save(self.save_dir / f"buffer.pth")
+        try:
+            self.buffer.save(self.save_dir / f"buffer_temp.pth")
+        except Exception as e:
+            os.remove(self.save_dir / f"buffer_temp.pth")
+            logger.error({"Msg": "Error saving buffer", "Error": e})
+            raise e
+        # move temp file to final file
+        os.rename(self.save_dir / f"buffer_temp.pth", self.save_dir / f"buffer.pth")
+        
+
+        # test model save
+        agent_test = Agent.load_model(self.save_dir / f"model_{n_epochs}.pt", "cpu")
+        assert self.agent == agent_test, "Model is not equal to saved model"
