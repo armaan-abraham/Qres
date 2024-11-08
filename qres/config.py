@@ -33,7 +33,7 @@ class Config:
     distance_penalty_coeff: float = 5e-4
 
     # training scale/duration
-    n_epochs: int = int(1e4)
+    n_epochs: int = int(6e3)
     train_iter: int = int(150)
     max_episode_length: int = 50
 

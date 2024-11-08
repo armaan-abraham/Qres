@@ -371,29 +371,35 @@ class Agent(torch.nn.Module):
             device=self.device,
             dtype=torch.bool,
         )
-        greedy_mask = (
-            sample > eps_threshold
-            if not greedy
-            else torch.ones_like(sample, dtype=torch.bool)
-        )
 
-        # Get actions for greedy choices
-        if greedy_mask.any():
-            with torch.no_grad():
-                q_values = self.policy_net(states[greedy_mask])
+        with torch.no_grad():
+            if greedy:
+                q_values = self.policy_net(states)
+                print(f"q_values mean: {q_values.mean().item()}")
                 max_indices = torch.argmax(q_values, dim=1)
-                actions[greedy_mask, max_indices] = True
+                actions[range(states.shape[0]), max_indices] = True
 
-        # Get random actions for exploration
-        random_mask = ~greedy_mask
-        if random_mask.any():
-            random_actions = torch.randint(
-                0,
-                config.action_dim,
-                (random_mask.sum().item(),),
-                device=self.device,
-            )
-            actions[random_mask, random_actions] = True
+            else:
+                greedy_mask = (
+                    sample > eps_threshold
+                )
+
+                # Get actions for greedy choices
+                if greedy_mask.any():
+                    q_values = self.policy_net(states[greedy_mask])
+                    max_indices = torch.argmax(q_values, dim=1)
+                    actions[greedy_mask, max_indices] = True
+
+                # Get random actions for exploration
+                random_mask = ~greedy_mask
+                if random_mask.any():
+                    random_actions = torch.randint(
+                        0,
+                        config.action_dim,
+                        (random_mask.sum().item(),),
+                        device=self.device,
+                    )
+                    actions[random_mask, random_actions] = True
 
         validate_actions(actions)
 
