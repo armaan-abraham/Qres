@@ -33,16 +33,20 @@ class Config:
     distance_penalty_coeff: float = 5e-4
 
     # training scale/duration
-    n_epochs: int = int(6e3)
+    n_epochs: int = int(1e4)
     train_iter: int = int(150)
-    max_episode_length: int = 50
+    max_episode_length: int = 30
+    buffer_size_rel_to_total_experience: float = 1/3
+    eval_interval: int = int(150)
 
     # batch size
     structure_predictor_batch_size: int = int(500)
     train_batch_size: int = int(2.5e3)
+    eval_batch_size: int = int(50)
+
     @property
     def max_buffer_size(self):
-        return self.n_epochs * self.train_batch_size
+        return self.n_epochs * self.train_batch_size * self.buffer_size_rel_to_total_experience
 
     @property
     def train_interval(self):
@@ -50,9 +54,9 @@ class Config:
 
     # DQN
     gamma: float = 0.99
-    epsilon_start: float = 0.9
+    epsilon_start: float = 0.95
     epsilon_end: float = 0.05
-    epsilon_decay: int = 1000
+    epsilon_decay: int = int(2e4)
     tau: float = 0.1
     update_target_every: int = 10
     lr: float = 3e-4

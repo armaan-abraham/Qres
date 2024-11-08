@@ -36,9 +36,16 @@ def parse_seqs_from_states(states: torch.Tensor) -> Tuple[torch.Tensor, torch.Te
 
 
 class Environment:
-    def __init__(self, device: str, batch_size: int | None = None):
+    def __init__(
+        self,
+        device: str,
+        batch_size: int | None = None,
+        structure_predictor: StructurePredictor | None = None,
+    ):
         self.device = device
-        self.structure_predictor = StructurePredictor(device=device)
+        self.structure_predictor = structure_predictor or StructurePredictor(
+            device=device
+        )
         self.batch_size = batch_size or config.structure_predictor_batch_size
 
         self.states = torch.stack([self._init_state() for _ in range(self.batch_size)])

@@ -19,6 +19,7 @@ class TaskType(Enum):
     PREDICT_STRUCTURE = 0
     TRAIN_AGENT = 1
     ERROR = 2
+    EVAL = 3
 
 
 def worker(
@@ -68,6 +69,12 @@ def worker(
                         rewards.clone().to("cpu"),
                     )
 
+                # For logging env reset
+                env_reset = 0
+                if torch.any(env.steps_done == 0):
+                    assert torch.all(env.steps_done == 0)
+                    env_reset = 1
+
                 results.put(
                     (
                         TaskType.PREDICT_STRUCTURE,
@@ -81,6 +88,7 @@ def worker(
                             / 1e9,
                             "gpu_memory_reserved": torch.cuda.memory_reserved(device)
                             / 1e9,
+                            "env_reset": env_reset,
                         },
                     )
                 )
@@ -91,6 +99,7 @@ def worker(
                     next_states,
                     rewards,
                 )
+
             elif task_type == TaskType.TRAIN_AGENT:
                 assert agent.device == "cpu"
 
@@ -122,6 +131,44 @@ def worker(
                     )
                 )
                 del agent, buffer_local
+
+            elif task_type == TaskType.EVAL:
+                # run the agent through an entire episode to see how it performs
+                # when it can't learn from previous experiences on the same episode
+                eval_env = Environment(
+                    device=device,
+                    structure_predictor=env.structure_predictor,
+                    batch_size=config.eval_batch_size,
+                )
+
+                assert agent.device == "cpu"
+                agent = agent.to(device)
+
+                all_rewards = []
+                states = eval_env.get_states()
+                for i in range(config.max_episode_length):
+                    with torch.no_grad():
+                        actions = agent.select_actions(states)
+                        states, rewards = eval_env.step(states, actions)
+                    all_rewards.append(rewards)
+                assert torch.all(eval_env.steps_done == 0)  # already reset
+                rewards = torch.stack(all_rewards)
+
+                results.put(
+                    (
+                        TaskType.EVAL,
+                        {
+                            "rewards_mean": torch.mean(rewards).item(),
+                            "rewards_std": torch.std(rewards).item(),
+                            "rewards_min": torch.min(rewards).item(),
+                            "rewards_max": torch.max(rewards).item(),
+                            "device_id": device_id,
+                            "task_id": task["task_id"],
+                        },
+                    )
+                )
+                del agent, states, rewards, eval_env
+
             else:
                 raise ValueError(f"Unknown task type: {task_type}")
             torch.cuda.empty_cache()
@@ -175,8 +222,11 @@ class MultiTrainer:
 
         try:
             tasks_since_last_train = 0
-            # We only want one training task to be in progress at a time
+            tasks_since_last_eval = 0
+
             prev_train_completed = True
+            prev_eval_completed = True
+
             n_active_workers = 0
             task_id = 0
             epoch = 0
@@ -184,7 +234,7 @@ class MultiTrainer:
                 assert n_active_workers <= self.num_workers and n_active_workers >= 0
                 assert (
                     tasks_since_last_train >= 0
-                    # and tasks_since_last_train <= config.train_interval
+                    and tasks_since_last_eval >= 0
                 )
 
                 # Choose task type and add to task queue
@@ -200,10 +250,11 @@ class MultiTrainer:
                             "TaskID": task_id,
                         }
                     )
+                    task_type = TaskType.TRAIN_AGENT
                     tasks.put(
                         (
                             {
-                                "type": TaskType.TRAIN_AGENT,
+                                "type": task_type,
                                 "agent": self.agent,
                                 "task_id": task_id,
                             }
@@ -211,6 +262,29 @@ class MultiTrainer:
                     )
                     prev_train_completed = False
                     tasks_since_last_train = 0
+                elif (
+                    tasks_since_last_eval >= config.eval_interval
+                    and prev_eval_completed
+                ):
+                    logger.info(
+                        {
+                            "Msg": "Task created",
+                            "TaskType": "Eval",
+                            "TaskID": task_id,
+                        }
+                    )
+                    task_type = TaskType.EVAL
+                    tasks.put(
+                        (
+                            {
+                                "type": task_type,
+                                "agent": self.agent,
+                                "task_id": task_id,
+                            }
+                        )
+                    )
+                    prev_eval_completed = False
+                    tasks_since_last_eval = 0
                 else:
                     logger.info(
                         {
@@ -219,16 +293,22 @@ class MultiTrainer:
                             "TaskID": task_id,
                         }
                     )
+                    task_type = TaskType.PREDICT_STRUCTURE
                     tasks.put(
                         (
                             {
-                                "type": TaskType.PREDICT_STRUCTURE,
+                                "type": task_type,
                                 "agent": self.agent,
                                 "task_id": task_id,
                             }
                         )
                     )
+
+                if task_type != TaskType.EVAL:
+                    tasks_since_last_eval += 1
+                if task_type != TaskType.TRAIN_AGENT:
                     tasks_since_last_train += 1
+
                 task_id += 1
                 logger.step = task_id
                 n_active_workers += 1
@@ -263,6 +343,7 @@ class MultiTrainer:
                                 "AvgLoss": result["avg_loss"],
                                 "AvgReward": result["avg_reward"],
                                 "AvgStateActionValue": result["avg_state_action_value"],
+                                "Epsilon": self.agent.get_epsilon(),
                             }
                         )
 
@@ -274,6 +355,7 @@ class MultiTrainer:
                                     "avg_state_action_value": result[
                                         "avg_state_action_value"
                                     ],
+                                    "epsilon": result["epsilon"],
                                 }
                             )
 
@@ -296,6 +378,7 @@ class MultiTrainer:
                                 "DistancePenalty": result["distance_penalty"],
                                 "GpuMemoryAllocated": result["gpu_memory_allocated"],
                                 "GpuMemoryReserved": result["gpu_memory_reserved"],
+                                "EnvReset": result["env_reset"],
                             }
                         )
 
@@ -314,9 +397,34 @@ class MultiTrainer:
                                     "task_id": result["task_id"],
                                     "device_id": result["device_id"],
                                     "buffer_size": self.buffer.get_size(),
+                                    "env_reset": result["env_reset"],
                                 }
                             )
-
+                    elif task_type == TaskType.EVAL:
+                        prev_eval_completed = True
+                        logger.info(
+                            {
+                                "Msg": "Task completed",
+                                "TaskType": "Eval",
+                                "TaskID": result["task_id"],
+                                "DeviceID": result["device_id"],
+                                "RewardsMean": result["rewards_mean"],
+                                "RewardsStd": result["rewards_std"],
+                                "RewardsMin": result["rewards_min"],
+                                "RewardsMax": result["rewards_max"],
+                            }
+                        )
+                        if config.wandb_enabled:
+                            wandb.log(
+                                {
+                                    "rewards_mean": result["rewards_mean"],
+                                    "rewards_std": result["rewards_std"],
+                                    "rewards_min": result["rewards_min"],
+                                    "rewards_max": result["rewards_max"],
+                                    "task_id": result["task_id"],
+                                    "device_id": result["device_id"],
+                                }
+                            )
                     n_active_workers -= 1
 
         except BaseException as e:
@@ -340,4 +448,4 @@ class MultiTrainer:
             }
         )
         self.agent.save_model(self.save_dir / f"model_{n_epochs}.pt")
-        self.buffer.save(self.save_dir / f"buffer_{n_epochs}.pth")
+        self.buffer.save(self.save_dir / f"buffer.pth")

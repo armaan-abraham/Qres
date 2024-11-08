@@ -333,7 +333,7 @@ class Agent(torch.nn.Module):
     def __init__(self, device: str):
         super().__init__()
         self.device = device
-        self.steps_done = 0
+        self.steps_done = torch.tensor(0, device=device)
 
         self.policy_net = DQN().to(device)
         self.target_net = DQN().to(device)
@@ -354,9 +354,9 @@ class Agent(torch.nn.Module):
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
 
-    def get_epsilon(self):
+    def get_epsilon(self) -> float:
         return self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(
-            -1.0 * self.steps_done / self.epsilon_decay
+            -1.0 * self.steps_done.item() / self.epsilon_decay
         )
 
     def select_actions(
@@ -421,6 +421,7 @@ class Agent(torch.nn.Module):
                 "policy_net_state_dict": self.policy_net.state_dict(),
                 "target_net_state_dict": self.target_net.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
+                "steps_done": self.steps_done,
             },
             path,
         )
@@ -498,6 +499,7 @@ class Agent(torch.nn.Module):
         inst.device = device
         inst.policy_net = inst.policy_net.to(device)
         inst.target_net = inst.target_net.to(device)
+        inst.steps_done = inst.steps_done.to(device)
         for state in inst.optimizer.state.values():
             for k, v in state.items():
                 if isinstance(v, torch.Tensor):
@@ -524,7 +526,7 @@ class Agent(torch.nn.Module):
         self.policy_net.load_state_dict(policy_state)
         self.target_net.load_state_dict(target_state)
         self.optimizer.load_state_dict(optimizer_state)
-        self.steps_done = other.steps_done
+        self.steps_done.copy_(other.steps_done)
 
     def get_n_params(self):
         return sum(p.numel() for p in self.policy_net.parameters())
