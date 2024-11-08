@@ -380,9 +380,7 @@ class Agent(torch.nn.Module):
                 actions[range(states.shape[0]), max_indices] = True
 
             else:
-                greedy_mask = (
-                    sample > eps_threshold
-                )
+                greedy_mask = sample > eps_threshold
 
                 # Get actions for greedy choices
                 if greedy_mask.any():

@@ -1,15 +1,16 @@
 import io
-import numpy as np
+
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-from Bio.PDB import PDBParser
+import numpy as np
 import torch
+from Bio.PDB import PDBParser
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 # Instantiate the StructurePredictor
 from qres.structure_prediction import StructurePredictor
 
-def plot_structure(sequence: str, output_path: str):
 
+def plot_structure(sequence: str, output_path: str):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     predictor = StructurePredictor(device=device)
 
@@ -43,10 +44,7 @@ def plot_structure(sequence: str, output_path: str):
 
 
 if __name__ == "__main__":
-    sequences = [
-        "",
-        ""
-    ]
+    sequences = ["", ""]
     """
       Step 1   : Sequence: AQVWNACCHTKAQDWCCCMRIDEGKRSCYG, Reward: 0.46955960988998413
         Step 2   : Sequence: AQVWNACCHTKAQLWCCCMRIDEGKRSCYG, Reward: 0.46335723996162415

@@ -72,7 +72,9 @@ def worker(
                 # For logging env reset
                 env_reset = 0
                 if torch.any(env.steps_done == 0):
-                    assert torch.all(env.steps_done == 0)
+                    assert torch.all(
+                        env.steps_done == 0
+                    ), f"Steps done: {env.steps_done}"
                     env_reset = 1
 
                 results.put(
@@ -151,7 +153,9 @@ def worker(
                         actions = agent.select_actions(states)
                         states, rewards = eval_env.step(states, actions)
                     all_rewards.append(rewards)
-                assert torch.all(eval_env.steps_done == 0)  # already reset
+                assert torch.all(
+                    eval_env.steps_done == 0
+                ), f"Steps done: {eval_env.steps_done}"
                 rewards = torch.stack(all_rewards)
 
                 results.put(
@@ -232,10 +236,7 @@ class MultiTrainer:
             epoch = 0
             while epoch < config.n_epochs:
                 assert n_active_workers <= self.num_workers and n_active_workers >= 0
-                assert (
-                    tasks_since_last_train >= 0
-                    and tasks_since_last_eval >= 0
-                )
+                assert tasks_since_last_train >= 0 and tasks_since_last_eval >= 0
 
                 # Choose task type and add to task queue
                 if (
@@ -310,7 +311,6 @@ class MultiTrainer:
                     tasks_since_last_train += 1
 
                 task_id += 1
-                logger.step = task_id
                 n_active_workers += 1
 
                 if n_active_workers == self.num_workers:
@@ -343,7 +343,7 @@ class MultiTrainer:
                                 "AvgLoss": result["avg_loss"],
                                 "AvgReward": result["avg_reward"],
                                 "AvgStateActionValue": result["avg_state_action_value"],
-                                "Epsilon": self.agent.get_epsilon(),
+                                "Epsilon": self.agent.get_epsilon().item(),
                             }
                         )
 
@@ -355,7 +355,8 @@ class MultiTrainer:
                                     "avg_state_action_value": result[
                                         "avg_state_action_value"
                                     ],
-                                    "epsilon": result["epsilon"],
+                                    "epsilon": self.agent.get_epsilon().item(),
+                                    "epoch": epoch,
                                 }
                             )
 
@@ -373,6 +374,7 @@ class MultiTrainer:
                                 "TaskID": result["task_id"],
                                 "DeviceID": result["device_id"],
                                 "BufferSize": self.buffer.get_size(),
+                                "BufferPos": self.buffer.get_pos(),
                                 "Reward": result["reward"],
                                 "Confidence": result["confidence"],
                                 "DistancePenalty": result["distance_penalty"],
@@ -397,6 +399,7 @@ class MultiTrainer:
                                     "task_id": result["task_id"],
                                     "device_id": result["device_id"],
                                     "buffer_size": self.buffer.get_size(),
+                                    "buffer_pos": self.buffer.get_pos(),
                                     "env_reset": result["env_reset"],
                                 }
                             )

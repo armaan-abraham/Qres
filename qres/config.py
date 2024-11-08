@@ -3,9 +3,9 @@ from multiprocessing import Manager
 from pathlib import Path
 from typing import Optional
 
+import petname
 import torch
 import yaml
-import petname
 
 AMINO_ACIDS = list("ACDEFGHIKLMNPQRSTVWY")
 N_AMINO_ACIDS = len(AMINO_ACIDS)
@@ -29,24 +29,28 @@ def get_curr_save_dir(run_id: str):
 @dataclass
 class Config:
     # training objective
-    seq_len: int = 30
+    seq_len: int = 10
     distance_penalty_coeff: float = 5e-4
 
     # training scale/duration
-    n_epochs: int = int(1e4)
-    train_iter: int = int(150)
-    max_episode_length: int = 30
-    buffer_size_rel_to_total_experience: float = 1/3
-    eval_interval: int = int(150)
+    n_epochs: int = int(20)
+    train_iter: int = int(1)
+    max_episode_length: int = 2
+    buffer_size_rel_to_total_experience: float = 1 / 3
+    eval_interval: int = int(2)
 
     # batch size
-    structure_predictor_batch_size: int = int(500)
-    train_batch_size: int = int(2.5e3)
-    eval_batch_size: int = int(50)
+    structure_predictor_batch_size: int = int(2)
+    train_batch_size: int = int(2)
+    eval_batch_size: int = int(2)
 
     @property
     def max_buffer_size(self):
-        return self.n_epochs * self.train_batch_size * self.buffer_size_rel_to_total_experience
+        return int(
+            self.n_epochs
+            * self.train_batch_size
+            * self.buffer_size_rel_to_total_experience
+        )
 
     @property
     def train_interval(self):
@@ -119,12 +123,12 @@ class Config:
     def __str__(self):
         # Get regular attributes
         attrs = {k: v for k, v in vars(self).items() if not k.startswith("__")}
-        
+
         # Add properties
         for name in dir(self.__class__):
             if isinstance(getattr(self.__class__, name), property):
                 attrs[name] = getattr(self, name)
-                
+
         return "\n".join([f"{k}: {v}" for k, v in attrs.items()])
 
 

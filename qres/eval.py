@@ -10,7 +10,9 @@ from qres.environment import Environment, parse_seqs_from_states
 
 def main():
     # Specify model path
-    model_path = Path(__file__).parent / "data" / "run_truly-picked-snipe" / "model_3499.pt"
+    model_path = (
+        Path(__file__).parent / "data" / "run_truly-picked-snipe" / "model_3499.pt"
+    )
 
     # Device configuration
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -22,13 +24,23 @@ def main():
     checkpoint = torch.load(model_path, map_location=device)
 
     # Verify all parameters are present in state dicts
-    policy_missing = set(agent.policy_net.state_dict().keys()) - set(checkpoint["policy_net_state_dict"].keys())
-    target_missing = set(agent.target_net.state_dict().keys()) - set(checkpoint["target_net_state_dict"].keys())
+    policy_missing = set(agent.policy_net.state_dict().keys()) - set(
+        checkpoint["policy_net_state_dict"].keys()
+    )
+    target_missing = set(agent.target_net.state_dict().keys()) - set(
+        checkpoint["target_net_state_dict"].keys()
+    )
     if policy_missing or target_missing:
-        raise ValueError(f"Missing parameters in checkpoint: Policy net: {policy_missing}, Target net: {target_missing}")
+        raise ValueError(
+            f"Missing parameters in checkpoint: Policy net: {policy_missing}, Target net: {target_missing}"
+        )
 
-    agent.policy_net.load_state_dict(checkpoint["policy_net_state_dict"], strict=True, assign=True)
-    agent.target_net.load_state_dict(checkpoint["target_net_state_dict"], strict=True, assign=True)
+    agent.policy_net.load_state_dict(
+        checkpoint["policy_net_state_dict"], strict=True, assign=True
+    )
+    agent.target_net.load_state_dict(
+        checkpoint["target_net_state_dict"], strict=True, assign=True
+    )
     agent.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     # agent.steps_done = checkpoint.get("steps_done", 0)
     agent = agent.to(device)
@@ -74,7 +86,6 @@ def main():
         # Save rewards and sequences
         rewards.append(reward.tolist())  # Convert tensor to list for multiple rewards
 
-
         # Decode sequences from states
         _, seqs = parse_seqs_from_states(states)  # seqs: (batch_size, seq_len)
         seq_strings = [env.decode_seq(seq) for seq in seqs]  # Decode each sequence
@@ -88,7 +99,7 @@ def main():
         print(f"last reward: {env.last_reward}")
         print(f"last confidence: {env.last_confidence}")
         print(f"last distance penalty: {env.last_distance_penalty}")
-    
+
     rewards = np.array(rewards)
     assert rewards.shape == (num_steps, batch_size)
     print("Avg reward by step:")
@@ -105,14 +116,17 @@ def main():
         print(f"\nSequence {seq_idx + 1}:")
         print(f"Average reward: {np.mean(rewards[:, seq_idx])}")
         try:
-            for step_idx, (step_seqs, step_rewards) in enumerate(zip(sequences, rewards)):
+            for step_idx, (step_seqs, step_rewards) in enumerate(
+                zip(sequences, rewards)
+            ):
                 print(
-                f"  Step {step_idx + 1:<4d}: Sequence: {step_seqs[seq_idx]}, Reward: {step_rewards[seq_idx]}"
-            )
+                    f"  Step {step_idx + 1:<4d}: Sequence: {step_seqs[seq_idx]}, Reward: {step_rewards[seq_idx]}"
+                )
         except Exception as e:
             print(e)
 
     print(f"Average reward: {np.mean(rewards)}")
+
 
 if __name__ == "__main__":
     main()

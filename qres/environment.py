@@ -89,9 +89,9 @@ class Environment:
 
         next_states, rewards = self.seqs_to_states_rewards(init_seqs, next_seqs)
 
-        dones = self.steps_done >= config.max_episode_length
-
         self.steps_done += 1
+
+        dones = self.steps_done >= config.max_episode_length
         self.steps_done[dones] = 0
 
         for i in range(self.batch_size):
