@@ -1,21 +1,32 @@
-# Qres: Generative model for the residue distance-constrained design of proteins
+# Qres: Protein design by RL from AI feedback
 
-- We have a relatively easy-to-verify objective in silico for a protein, which
-are ranges of distances between one or more residues or groups of residues. We
-start out with single residue--single residue constraints though. Namely, we can
-predict the structure with AF2 or ESM-fold, and then calculate these residue
-distances. For example we may want residue 1 and 5 to be 8-10A apart.
-- But we want some way of generating proteins that satisfy this constraint. This
-is where the generative model comes in. We introduce a solution, first using an
-RL agent, that solves this problem by iteratively
-proposing solutions, which are then verified in silico.
-- In our base case, we use ESM-fold with efficient options to allow quick
-structure prediction. The first generative model will be an RL agent with a deep
-Q network. The RL agent will only generate sequences with fixed length, and thus
-will only accept constraints that are consistent with this fixed length.
-Actually, we generally want to manually check that the constraint is consistent
-with the sequence length. This can be done by considering the unfolded length of
-the amino acid sequence using minimum and maximum size amino acids. The RL agent
-will suggest a batch of sequences at each iteration. It will update residues in
-the batch based on the rewards from the batch (the reward is associated with
-each protein in the batch separately, of course).
+<div align="center">
+  <img src="./qres/data/img/Screenshot%202024-11-09%20at%201.18.00%E2%80%AFPM.png" style="max-width: 700px;">
+</div>
+
+## Overview
+
+ESMFold (which serves the same purpose as AlphaFold2) allows us to infer the
+structure of a protein given its sequence, but the protein design problem, which
+is roughly the inverse of this, is still quite difficult. A simplified
+formulation of the design problem is to generate some sequence that, when
+folded, possesses some provided structural characteristic(s), e.g. a binding
+pocket with some roughly-specified shape. One approach to this particular
+problem formulation is that a user provides a structural design criteria, such
+as a pairwise distance between two residues, to an RL agent that generates a
+sequence incrementally, with its reward signal computed based on how well the
+ESMFold-predicted structure of the constructed sequence satisfies the criteria.
+
+In my first experiment, I solved the easier problem of having the RL agent
+generate stable protein structures with minimal edit distance from some initial
+sequence, which is shown in the image above. I'm currently working on allowing
+more complicated design criteria, such as pairwise distance constraints.
+
+## Usage
+
+This project uses [rye](https://github.com/astral-sh/rye) to manage Python
+dependencies. To install the dependencies, run `rye sync` in the root directory.
+
+To evaluate the most recent model on the stability task, run `rye run python qres/eval.py`.
+You can also visualize the model design trajectories in `qres/visualize.ipynb`.
+
