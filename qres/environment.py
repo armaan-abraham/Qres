@@ -3,6 +3,7 @@ from typing import Tuple
 
 import torch
 from jaxtyping import Bool, Float
+from typing import List
 
 from qres.config import AMINO_ACIDS, N_AMINO_ACIDS, config
 from qres.structure_prediction import StructurePredictor
@@ -123,6 +124,14 @@ class Environment:
 
     def decode_seq(self, seq: torch.Tensor) -> str:
         return "".join([AMINO_ACIDS[i] for i in seq.cpu().numpy()])
+    
+    def infer_confidence(self, seqs: List[str]) -> Float[torch.Tensor, "batch 1"]:
+        pdbs = self.structure_predictor.predict_structure(seqs)
+        confidences = torch.tensor(
+            [self.structure_predictor.overall_confidence_from_pdb(pdb) for pdb in pdbs],
+            device=self.device,
+        )
+        return confidences
 
     def seqs_to_states_rewards(
         self,
@@ -134,14 +143,7 @@ class Environment:
         if config.fake_structure_prediction:
             confidences = torch.rand(self.batch_size, device=self.device)
         else:
-            pdbs = self.structure_predictor.predict_structure(seqs_str)
-            confidences = torch.tensor(
-                [
-                    self.structure_predictor.overall_confidence_from_pdb(pdb)
-                    for pdb in pdbs
-                ],
-                device=self.device,
-            )
+            confidences = self.infer_confidence(seqs_str)
 
         # add penalty term for number of edits
         distance_penalty = config.distance_penalty_coeff * (
